@@ -11,7 +11,7 @@ func TestMapRow(t *testing.T) {
 	t.Parallel()
 
 	db := testConnectToDatabase(t)
-	defer db.Close()
+	defer testCloseDB(t, db)
 
 	stmt, err := ConvertNamedToPositionalParams(
 		insertTestingDataTypeQuery,
