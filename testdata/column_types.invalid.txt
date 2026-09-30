@@ -1,0 +1,13 @@
+package contract
+
+import "github.com/neumachen/dbsql"
+
+type CustomID int64
+
+var _ = dbsql.BindColumn("id", func(int) error { return nil })
+var _ = dbsql.BindColumn("score", func(float32) error { return nil })
+var _ dbsql.ColumnValue[*int64]
+var _ = dbsql.BindColumn("data", func(map[string]string) error { return nil })
+var _ = dbsql.BindColumn("object", func(struct{}) error { return nil })
+var _ = dbsql.BindColumn("id", func(CustomID) error { return nil })
+var _ = dbsql.BindNullableColumn[any]("data", nil)
