@@ -17,7 +17,7 @@ func TestExecContext(t *testing.T) {
 		assertion func(*testing.T, string)
 	}{
 		{
-			name: "PrepareStatement returns an error when the Prepare operation fails",
+			name: "returns the error from the executor",
 			assertion: func(t *testing.T, desc string) {
 				preparedStatement, err := PrepareStatement(insertTestingDataTypeQuery)
 				require.NoError(t, err, desc)

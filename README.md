@@ -122,19 +122,15 @@ if err != nil {
     // Handle error
 }
 
-// Bind the named parameters
-if err := stmt.BindNamedParameterValue("name", "John"); err != nil {
-    // Handle error
-}
-if err := stmt.BindNamedParameterValue("age", 30); err != nil {
-    // Handle error
-}
-
-// Execute the prepared statement
-rows, err := stmt.Query(db)
+// Bind the named parameters and execute the statement
+rows, err := dbsql.QueryContext(ctx, db, stmt,
+    dbsql.BindParameterValue("name", "John"),
+    dbsql.BindParameterValue("age", 30),
+)
 if err != nil {
     // Handle error
 }
+defer rows.Close()
 ```
 
 Named parameters are rewritten to PostgreSQL placeholders (`$1`, `$2`, ...) in
@@ -150,6 +146,49 @@ into the built-in operators `<@`, `@@`, `@@@`, or `@-@`, `PrepareStatement`
 returns an error. Add whitespace to choose: `x <@ name` uses the operator,
 `x < @name` uses the parameter, and `x <@ @name` uses both. Other operators
 directly before a parameter, as in `x=@name` or `x||@name`, bind the parameter.
+
+### Executing statements
+
+`Exec`, `Query`, `QueryRow` and their `Context` variants bind the values and
+execute the rewritten SQL through the executor's `ExecContext`, `QueryContext`
+or `QueryRowContext` method. The executor can be a `*sql.DB` or a `*sql.Tx`.
+
+- No explicit `Prepare` is issued, so no server-side prepared statement is left
+  behind per call. `database/sql` and the driver manage any statement they use
+  and release it with the result or the rows.
+- The caller owns transactions and returned rows. Read rows until `Next`
+  returns false or call `Close`; inside a transaction, do this before `Commit`
+  or `Rollback`.
+- Each call accepts exactly one SQL statement. Trailing semicolons, whitespace
+  and comments are allowed, and so are semicolons inside string constants,
+  quoted identifiers, comments and dollar-quoted strings. Anything after a
+  statement-ending semicolon is rejected with `ErrMultipleStatements` before the
+  database is contacted, with or without parameters.
+- The check does not depend on the server's `standard_conforming_strings`
+  setting. Whether a backslash escapes a quote in a plain `'...'` string depends
+  on that setting, so the SQL is read both ways and rejected when either reading
+  finds more than one statement. Text whose statement count depends on the
+  setting is therefore rejected; use `E'...'` strings, doubled quotes or
+  dollar quotes, whose meaning does not depend on it. Literals that are valid
+  under only one setting, such as `'C:\temp\'`, are still sent; the server
+  rejects them under the other setting.
+- SQL-standard function bodies (`CREATE FUNCTION ... BEGIN ATOMIC ...; END`)
+  are a single statement, but they are rejected because their inner semicolons
+  cannot be told apart from statement separators without a SQL parser. This is
+  a known compatibility limitation; use a dollar-quoted body or run such
+  statements through `database/sql` directly.
+- `QueryRow` and `QueryRowContext` follow `database/sql`: database errors are
+  reported by the row's `Scan`. Their error result only reports problems found
+  before the database is contacted, such as nil arguments, a rejected statement
+  or a binder error.
+- Bound values are reset after every call. Unbound parameter names are sent as
+  NULL and names that do not occur in the statement are ignored.
+
+Compatibility notes: earlier versions prepared a statement for every call and
+never closed it. Executors no longer receive `Prepare` calls, preparation errors
+from `QueryRow` now surface at `Scan`, and SQL containing several statements is
+now rejected. With lib/pq, statements without parameters use the simple query
+protocol.
 
 ### Column Mapping
 

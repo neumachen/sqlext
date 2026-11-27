@@ -83,9 +83,9 @@ var (
 //		// handle error
 //	}
 //
-//	rows, err := preparedStmt.Query(db,
-//		BindNamedParameterValue("name", "John"),
-//		BindNamedParameterValue("age", 30),
+//	rows, err := QueryContext(ctx, db, preparedStmt,
+//		BindParameterValue("name", "John"),
+//		BindParameterValue("age", 30),
 //	)
 //	if err != nil {
 //		// handle error
@@ -247,28 +247,40 @@ func (r *statementRewriter) namedParameter(i int) (int, error) {
 	return end, nil
 }
 
+func (r *statementRewriter) isEscapeStringQuote(i int) bool {
+	return isEscapeStringQuote(r.src, i)
+}
+
+func (r *statementRewriter) followsIdentifier(i int) bool {
+	return followsIdentifier(r.src, i)
+}
+
+func (r *statementRewriter) byteAt(i int) byte {
+	return byteAt(r.src, i)
+}
+
 // isEscapeStringQuote reports whether the quote at i opens an E'...' string, where
 // backslash escapes apply. The E must start its own token; in abcE'x' it is part
 // of an identifier and the quote opens a standard string.
-func (r *statementRewriter) isEscapeStringQuote(i int) bool {
-	prefix := r.byteAt(i - 1)
-	return (prefix == 'E' || prefix == 'e') && !isIdentifierByte(r.byteAt(i-2))
+func isEscapeStringQuote(src string, i int) bool {
+	prefix := byteAt(src, i-1)
+	return (prefix == 'E' || prefix == 'e') && !isIdentifierByte(byteAt(src, i-2))
 }
 
 // followsIdentifier reports whether the byte before i continues an identifier.
 // PostgreSQL identifiers may contain '$', so in a$1 or a$$ the '$' starts neither
 // a placeholder nor a dollar quote.
-func (r *statementRewriter) followsIdentifier(i int) bool {
-	return isIdentifierByte(r.byteAt(i - 1))
+func followsIdentifier(src string, i int) bool {
+	return isIdentifierByte(byteAt(src, i-1))
 }
 
 // byteAt returns 0 outside the statement so callers can look around i without
-// bounds checks; 0 never matches any byte the rewriter treats as significant.
-func (r *statementRewriter) byteAt(i int) byte {
-	if i < 0 || i >= len(r.src) {
+// bounds checks; 0 never matches any byte the lexer treats as significant.
+func byteAt(src string, i int) byte {
+	if i < 0 || i >= len(src) {
 		return 0
 	}
-	return r.src[i]
+	return src[i]
 }
 
 // skipQuoted returns the offset after the quoted string or identifier that

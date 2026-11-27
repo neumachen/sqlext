@@ -6,6 +6,7 @@ import (
 )
 
 // Query executes the prepared SQL statement as a query with the bound parameters.
+// It uses the default background context. See QueryContext for details.
 func Query(
 	dbPrepExec DBPreparerExecutor,
 	preparedStatement PreparedStatement,
@@ -22,7 +23,17 @@ func Query(
 	)
 }
 
-// QueryContext executes the prepared SQL statement as a query with the bound parameters in the provided context.
+// QueryContext binds the parameter values and runs the rewritten statement
+// with dbPrepExec.QueryContext. dbPrepExec may be a *sql.DB or a *sql.Tx.
+//
+// The caller owns the returned rows and must close them, either by reading
+// them until Next returns false or by calling Close. Inside a transaction,
+// finish or close the rows before Commit or Rollback; database/sql cancels rows
+// that are still open when the transaction ends. No server-side prepared
+// statement outlives the rows.
+//
+// The single-statement rule, the pre-execution errors, the binding rules and
+// the reset of bound values are the same as for ExecContext.
 func QueryContext(
 	ctx context.Context,
 	dbPrepExec DBPreparerExecutor,
@@ -32,22 +43,16 @@ func QueryContext(
 	*sql.Rows,
 	error,
 ) {
-	defer func() {
-		preparedStatement.ResetParametersValues()
-	}()
-
-	prepStmnt, err := dbPrepare(
-		ctx,
-		dbPrepExec,
-		preparedStatement,
-		binderFuncs...,
-	)
+	reset, err := startExecution(dbPrepExec, preparedStatement)
+	defer reset()
 	if err != nil {
 		return nil, err
 	}
 
-	return prepStmnt.QueryContext(
-		ctx,
-		preparedStatement.BoundParameterValues()...,
-	)
+	query, args, err := prepareExecution(preparedStatement, binderFuncs...)
+	if err != nil {
+		return nil, err
+	}
+
+	return dbPrepExec.QueryContext(contextOrBackground(ctx), query, args...)
 }

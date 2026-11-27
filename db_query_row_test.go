@@ -15,7 +15,7 @@ func TestQueryRowContext(t *testing.T) {
 		assertion func(*testing.T, string)
 	}{
 		{
-			desc: "PrepareStatement returns an error when the Prepare operation fails",
+			desc: "returns an error when the executor returns no row",
 			assertion: func(t *testing.T, desc string) {
 				preparedStatement, err := PrepareStatement(createCustomerQuery)
 				require.NoError(t, err, "failed to convert to positional params")
