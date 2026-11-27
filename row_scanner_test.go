@@ -11,26 +11,26 @@ import (
 
 func TestTypedRowOrderedReusableMapping(t *testing.T) {
 	fixture := &scanFixture{
-		columns: []string{"raw", "name", "id"},
-		values:  [][]driver.Value{{[]byte("first"), "Ada", int64(1)}, {[]byte("later"), nil, int64(0)}},
+		columns: []string{"raw", nameColumn, idColumn},
+		values:  [][]driver.Value{{[]byte("first"), adaName, int64(1)}, {[]byte("later"), nil, int64(0)}},
 	}
 	rows := openScanRows(t, fixture)
 	var id int64
 	var name sqlext.ColumnValue[string]
 	var raw []byte
 	bindings := sqlext.DefineColumnBinders(
-		sqlext.BindColumn("id", func(v int64) error { id = v; return nil }),
-		sqlext.BindNullableColumn("name", func(v sqlext.ColumnValue[string]) error { name = v; return nil }),
+		sqlext.BindColumn(idColumn, func(v int64) error { id = v; return nil }),
+		sqlext.BindNullableColumn(nameColumn, func(v sqlext.ColumnValue[string]) error { name = v; return nil }),
 		sqlext.BindColumn("raw", func(v []byte) error { raw = v; return nil }),
 	)
 	scanner, err := sqlext.NewRowScanner(rows, bindings)
 	require.NoError(t, err)
-	bindings[0] = sqlext.BindColumn("id", func(int64) error { return errors.New("replacement must not run") })
+	bindings[0] = sqlext.BindColumn(idColumn, func(int64) error { return errors.New("replacement must not run") })
 	require.Zero(t, fixture.nextCalls)
 	require.True(t, rows.Next())
 	require.NoError(t, scanner.Scan())
 	require.Equal(t, int64(1), id)
-	require.Equal(t, sqlext.ColumnValue[string]{Value: "Ada", Valid: true}, name)
+	require.Equal(t, sqlext.ColumnValue[string]{Value: adaName, Valid: true}, name)
 	first := raw
 	require.Equal(t, 1, fixture.nextCalls)
 	require.Zero(t, fixture.closeCalls)
@@ -68,10 +68,10 @@ func TestTypedRowPartialAssignment(t *testing.T) {
 }
 
 func TestTypedRowLifecycle(t *testing.T) {
-	fixture := &scanFixture{columns: []string{"id"}, values: [][]driver.Value{{int64(7)}}}
+	fixture := &scanFixture{columns: []string{idColumn}, values: [][]driver.Value{{int64(7)}}}
 	rows := openScanRows(t, fixture)
 	calls := 0
-	scanner, err := sqlext.NewRowScanner(rows, sqlext.DefineColumnBinders(sqlext.BindColumn("id", func(int64) error { calls++; return nil })))
+	scanner, err := sqlext.NewRowScanner(rows, sqlext.DefineColumnBinders(sqlext.BindColumn(idColumn, func(int64) error { calls++; return nil })))
 	require.NoError(t, err)
 	require.Error(t, scanner.Scan())
 	require.Zero(t, calls)
@@ -89,8 +89,8 @@ func TestTypedRowEmptyAndIterationError(t *testing.T) {
 	want := errors.New("iteration failed")
 	for name, iterationErr := range map[string]error{"empty": nil, "iteration error": want} {
 		t.Run(name, func(t *testing.T) {
-			rows := openScanRows(t, &scanFixture{columns: []string{"id"}, iterationErr: iterationErr})
-			scanner, err := sqlext.NewRowScanner(rows, sqlext.DefineColumnBinders(sqlext.BindColumn("id", func(int64) error { return nil })))
+			rows := openScanRows(t, &scanFixture{columns: []string{idColumn}, iterationErr: iterationErr})
+			scanner, err := sqlext.NewRowScanner(rows, sqlext.DefineColumnBinders(sqlext.BindColumn(idColumn, func(int64) error { return nil })))
 			require.NoError(t, err)
 			require.NotNil(t, scanner)
 			require.False(t, rows.Next())
@@ -100,9 +100,9 @@ func TestTypedRowEmptyAndIterationError(t *testing.T) {
 }
 
 func TestTypedRowRuntimeTypeError(t *testing.T) {
-	rows := openScanRows(t, &scanFixture{columns: []string{"id"}, values: [][]driver.Value{{"7"}}})
+	rows := openScanRows(t, &scanFixture{columns: []string{idColumn}, values: [][]driver.Value{{"7"}}})
 	calls := 0
-	scanner, err := sqlext.NewRowScanner(rows, sqlext.DefineColumnBinders(sqlext.BindColumn("id", func(int64) error { calls++; return nil })))
+	scanner, err := sqlext.NewRowScanner(rows, sqlext.DefineColumnBinders(sqlext.BindColumn(idColumn, func(int64) error { calls++; return nil })))
 	require.NoError(t, err)
 	require.True(t, rows.Next())
 	err = scanner.Scan()

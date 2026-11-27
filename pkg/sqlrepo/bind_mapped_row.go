@@ -33,7 +33,8 @@ func BindMappedRow(
 	return nil
 }
 
-// RowBinder ...
+// RowBinder is implemented by result types that describe, through their column
+// binders, how a mapped row is bound to their fields.
 type RowBinder interface {
 	ColumnBinders() sqlext.ColumnBinders
 }

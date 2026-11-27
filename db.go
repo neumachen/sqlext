@@ -76,7 +76,8 @@ type DBPinger interface {
 	Ping() error
 }
 
-// DB ...
+// DB is the full set of database operations used by this package: execution,
+// preparation, closing and pinging, as provided by *sql.DB.
 type DB interface {
 	DBExecutor
 	DBPreparer

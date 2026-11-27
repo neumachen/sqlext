@@ -13,7 +13,7 @@ import (
 func TestTypedColumnNullModes(t *testing.T) {
 	t.Run("ordinary setter preserves destination", func(t *testing.T) {
 		got, calls := int64(42), 0
-		column := sqlext.BindColumn("id", func(v int64) error { got = v; calls++; return nil })
+		column := sqlext.BindColumn(idColumn, func(v int64) error { got = v; calls++; return nil })
 		err := column.Scan(nil)
 		require.NoError(t, err)
 		require.Equal(t, int64(42), got)
@@ -22,7 +22,7 @@ func TestTypedColumnNullModes(t *testing.T) {
 	t.Run("nullable setter observes null", func(t *testing.T) {
 		got := sqlext.ColumnValue[string]{Value: "previous", Valid: true}
 		calls := 0
-		column := sqlext.BindNullableColumn("name", func(v sqlext.ColumnValue[string]) error {
+		column := sqlext.BindNullableColumn(nameColumn, func(v sqlext.ColumnValue[string]) error {
 			got = v
 			calls++
 			return nil
@@ -36,7 +36,7 @@ func TestTypedColumnNullModes(t *testing.T) {
 
 func TestTypedColumnZeroInvokesSetter(t *testing.T) {
 	got, calls := int64(42), 0
-	column := sqlext.BindColumn("id", func(v int64) error { got = v; calls++; return nil })
+	column := sqlext.BindColumn(idColumn, func(v int64) error { got = v; calls++; return nil })
 	err := column.Scan(int64(0))
 	require.NoError(t, err)
 	require.Zero(t, got)
@@ -45,7 +45,7 @@ func TestTypedColumnZeroInvokesSetter(t *testing.T) {
 
 func TestTypedColumnRejectsMismatchBeforeSetter(t *testing.T) {
 	calls := 0
-	column := sqlext.BindColumn("id", func(int64) error { calls++; return nil })
+	column := sqlext.BindColumn(idColumn, func(int64) error { calls++; return nil })
 	err := column.Scan(int(42))
 	require.ErrorIs(t, err, sqlext.ErrColumnType)
 	require.Zero(t, calls)
@@ -53,7 +53,7 @@ func TestTypedColumnRejectsMismatchBeforeSetter(t *testing.T) {
 
 func TestTypedColumnPreservesSetterError(t *testing.T) {
 	want := errors.New("setter failed")
-	column := sqlext.BindColumn("id", func(int64) error { return want })
+	column := sqlext.BindColumn(idColumn, func(int64) error { return want })
 	err := column.Scan(int64(42))
 	require.ErrorIs(t, err, want)
 }
@@ -73,8 +73,8 @@ func TestTypedColumnJSONTypeError(t *testing.T) {
 
 func TestTypedColumnInvalidBinding(t *testing.T) {
 	for name, column := range map[string]sqlext.ColumnScanner{
-		"nil ordinary": sqlext.BindColumn[int64]("id", nil),
-		"nil nullable": sqlext.BindNullableColumn[int64]("id", nil),
+		"nil ordinary": sqlext.BindColumn[int64](idColumn, nil),
+		"nil nullable": sqlext.BindNullableColumn[int64](idColumn, nil),
 		"empty name":   sqlext.BindColumn("", func(int64) error { return nil }),
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -88,18 +88,18 @@ func TestTypedColumnLegacyComposition(t *testing.T) {
 	var id int64
 	var name string
 	columns := sqlext.DefineColumnBinders(
-		sqlext.BindColumn("id", func(v int64) error { id = v; return nil }),
-		sqlext.DefineColumnBinding("name", sqlext.BindColumnToField(func(v string) error { name = v; return nil })),
+		sqlext.BindColumn(idColumn, func(v int64) error { id = v; return nil }),
+		sqlext.DefineColumnBinding(nameColumn, sqlext.BindColumnToField(func(v string) error { name = v; return nil })),
 	)
-	err := sqlrepo.BindMappedRow(columns, sqlext.MappedRow{"id": int64(7), "name": "Ada"})
+	err := sqlrepo.BindMappedRow(columns, sqlext.MappedRow{idColumn: int64(7), nameColumn: adaName})
 	require.NoError(t, err)
 	require.Equal(t, int64(7), id)
-	require.Equal(t, "Ada", name)
+	require.Equal(t, adaName, name)
 }
 
 func TestTypedColumnMissingDiffersFromNull(t *testing.T) {
 	calls := 0
-	column := sqlext.BindNullableColumn("id", func(sqlext.ColumnValue[int64]) error { calls++; return nil })
+	column := sqlext.BindNullableColumn(idColumn, func(sqlext.ColumnValue[int64]) error { calls++; return nil })
 	err := column.BindColumn(sqlext.MappedRow{})
 	require.ErrorIs(t, err, sqlext.ErrColumnMapping)
 	require.Zero(t, calls)

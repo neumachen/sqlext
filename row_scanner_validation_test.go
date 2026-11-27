@@ -19,16 +19,16 @@ func TestTypedRowInvalidMapping(t *testing.T) {
 		columns  []string
 		bindings sqlext.ColumnBinders
 	}{
-		{"nil binding", []string{"id"}, sqlext.ColumnBinders{nil}},
-		{"typed nil binding", []string{"id"}, sqlext.ColumnBinders{typedNil}},
-		{"nil setter", []string{"id"}, sqlext.ColumnBinders{sqlext.BindColumn[int64]("id", nil)}},
+		{"nil binding", []string{idColumn}, sqlext.ColumnBinders{nil}},
+		{"typed nil binding", []string{idColumn}, sqlext.ColumnBinders{typedNil}},
+		{"nil setter", []string{idColumn}, sqlext.ColumnBinders{sqlext.BindColumn[int64](idColumn, nil)}},
 		{"empty name", []string{""}, sqlext.ColumnBinders{bind("")}},
-		{"duplicate bindings", []string{"id", "other"}, sqlext.ColumnBinders{bind("id"), bind("id")}},
-		{"duplicate results", []string{"id", "id"}, sqlext.ColumnBinders{bind("id"), bind("other")}},
-		{"unbound result", []string{"other"}, sqlext.ColumnBinders{bind("id")}},
-		{"missing binding", []string{"id", "other"}, sqlext.ColumnBinders{bind("id")}},
-		{"extra binding", []string{"id"}, sqlext.ColumnBinders{bind("id"), bind("other")}},
-		{"legacy binder", []string{"id"}, sqlext.DefineColumnBinders(sqlext.DefineColumnBinding("id", sqlext.BindColumnToField(func(int64) error { return nil })))},
+		{"duplicate bindings", []string{idColumn, otherColumn}, sqlext.ColumnBinders{bind(idColumn), bind(idColumn)}},
+		{"duplicate results", []string{idColumn, idColumn}, sqlext.ColumnBinders{bind(idColumn), bind(otherColumn)}},
+		{"unbound result", []string{otherColumn}, sqlext.ColumnBinders{bind(idColumn)}},
+		{"missing binding", []string{idColumn, otherColumn}, sqlext.ColumnBinders{bind(idColumn)}},
+		{"extra binding", []string{idColumn}, sqlext.ColumnBinders{bind(idColumn), bind(otherColumn)}},
+		{"legacy binder", []string{idColumn}, sqlext.DefineColumnBinders(sqlext.DefineColumnBinding(idColumn, sqlext.BindColumnToField(func(int64) error { return nil })))},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			fixture := &scanFixture{columns: tc.columns}
@@ -50,7 +50,7 @@ func TestTypedRowNilAndClosedRows(t *testing.T) {
 	var zero sqlext.RowScanner
 	require.ErrorIs(t, zero.Scan(), sqlext.ErrColumnMapping)
 
-	rows := openScanRows(t, &scanFixture{columns: []string{"id"}})
+	rows := openScanRows(t, &scanFixture{columns: []string{idColumn}})
 	require.NoError(t, rows.Close())
 	_, err = sqlext.NewRowScanner(rows, nil)
 	require.Error(t, err)

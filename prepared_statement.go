@@ -139,10 +139,11 @@ func (p *preparedStatement) BindParameterValue(parameterName string, bindValue a
 // BindParameterValueFunc is a function that sets the value for a named parameter in the query.
 type BindParameterValueFunc func(p PreparedStatement) error
 
-// BindParameterValueFuncs ...
+// BindParameterValueFuncs is a list of parameter binders, applied in order.
 type BindParameterValueFuncs []BindParameterValueFunc
 
-// NewBindParameterValueFuncs ...
+// NewBindParameterValueFuncs returns a copy of the given binders, or nil when
+// none are given.
 func NewBindParameterValueFuncs(bindParameterValueFuncs ...BindParameterValueFunc) BindParameterValueFuncs {
 	count := len(bindParameterValueFuncs)
 	if count == 0 {

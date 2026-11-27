@@ -94,9 +94,9 @@ Run the isolated typed tests and example without a database:
 go test . -run '^(TestColumnValue.*|TestTyped.*|ExampleNewRowScanner)$' -count=1
 ```
 
-The existing full test suite requires its PostgreSQL fixtures. The typed tests
-use an in-memory driver to exercise `database/sql`; they do not verify PostgreSQL
-server behavior. The generic constraints enforce allowed Go types at compile
+These tests are part of the default, database-free `go test ./...` run. The
+typed tests use an in-memory driver to exercise `database/sql`; they do not
+verify PostgreSQL server behavior. The generic constraints enforce allowed Go types at compile
 time; SQL result types and JSON contents are checked at runtime.
 
 ## Installation
@@ -250,13 +250,127 @@ for _, row := range mappedRows {
 
 ## Testing
 
-The `sqlext` package includes a comprehensive test suite to ensure the reliability of its features. You can run the tests using the following command:
+`go test ./...` runs the database-free tests: parsing and rewriting, the
+single-statement check, execution through `database/sql` with an in-memory
+driver, typed scanning and the compile-time contract. It never opens a
+database or contacts another service, whatever runs on localhost. Add `-race`
+to check for data races.
 
-```
-go test -v ./...
+### Integration tests
+
+Tests that talk to PostgreSQL are compiled only with the `integration` build
+tag and run only against a disposable instance created for the run:
+
+```sh
+state=$(.dev/test-postgres.sh up)   # starts a labelled container on a loopback port
+set -a; . "$state"; set +a          # exports SQLEXT_TEST_POSTGRES_DSN and _CLUSTER
+go test -tags integration -count=1 ./...
+.dev/test-postgres.sh down "$state" # removes that container
 ```
 
-The tests cover a range of scenarios, including error handling, data mapping, and prepared statement execution.
+`.dev/test-postgres.sh` needs Docker. It starts a digest-pinned
+`postgres:16-alpine` container with a random password, data in tmpfs and
+`cluster_name` `sqlext-test-<random id>`, and checks the instance before it
+prints the state file.
+
+Safety expectations:
+
+- Both `SQLEXT_TEST_POSTGRES_DSN` and `SQLEXT_TEST_POSTGRES_CLUSTER` are
+  required. A missing, partial or mismatched configuration fails the tests; it
+  never falls back to a local default.
+- The cluster name must start with `sqlext-test-`, the server must report that
+  `cluster_name`, and the `public` schema may only hold the test fixtures and
+  tables the tests create.
+- These checks guard against pointing the tests at the wrong server, but they
+  cannot prove that an instance is disposable. The tests create, change and
+  delete data: only point them at an instance created for the run, never at a
+  database you care about. The development database in
+  `.dev/docker-compose.yml` is not a test target.
+- Setting the variables without `-tags integration` fails the default run, so
+  a run meant to be an integration run cannot pass without one.
+
+The older database tests (`TestMapColumn`, `TestMapRow`, `TestMapRows` and the
+`*Postgres` variants of the execution tests) also need the fixtures in
+`.dev/migrations`, which require PostGIS. Run them with both tags against an
+instance from a pinned PostGIS image:
+
+```sh
+state=$(SQLEXT_TEST_POSTGRES_IMAGE=<postgis image pinned by digest> .dev/test-postgres.sh up --fixtures)
+set -a; . "$state"; set +a
+go test -tags "integration pgfixtures" -count=1 ./...
+.dev/test-postgres.sh down "$state"
+```
+
+CI runs the database-free tests on the minimum Go version from `go.mod` and on
+the current release, and the `integration` tests against a disposable
+PostgreSQL. The fixture-based tests are not run in CI.
+
+### Formatting and linting
+
+CI checks formatting and lint with golangci-lint v2.12.2 and `.golangci.yml`,
+the version and configuration `.dev/lint.sh check` uses locally; CI reads the
+version from `EXPECTED_VERSION` in `.dev/lint.sh`. The lint step runs
+`golangci-lint run` through `golangci-lint-action` (with inline annotations on
+pull requests). A separate step downloads the official prebuilt golangci-lint
+release binary, verifies it against the release checksums and runs
+`golangci-lint fmt --diff ./...` (the `gofmt` and `goimports` settings in
+`.golangci.yml`); it fails on any formatting difference and also runs when lint
+fails. Locally `.dev/lint.sh` needs golangci-lint v2.12.2 on `PATH`, warns
+about other versions and stops with installation instructions when the tool is
+missing. It never runs tests or opens a database.
+
+```sh
+.dev/lint.sh check            # whole repository, formatting plus lint, as CI
+.dev/lint.sh check --changed  # only problems in Go changes since HEAD
+.dev/lint.sh check --staged   # only problems in the staged change
+.dev/lint.sh fmt              # format the Go files changed since HEAD
+```
+
+`check --changed` and `check --staged` report only issues in the changed
+lines, so findings that already exist elsewhere do not block unrelated work;
+`check` still reports them, as CI does. `check --staged` checks a copy of the
+index, so it sees exactly what will be committed. `fmt` rewrites only Go files
+changed since HEAD, only in the working tree, and never stages anything;
+review and stage the result yourself (with `git add -p` if a file is only
+partly staged).
+
+Automatic checks:
+
+- Git commits (opt-in, per clone): `.dev/install-git-hooks.sh` installs a
+  `pre-commit` hook in this clone's `.git/hooks` that runs
+  `.dev/lint.sh check --staged` and refuses the commit on problems. It does not
+  replace an existing `pre-commit` hook or work when `core.hooksPath` is set; in
+  those cases call `.dev/lint.sh check --staged` from your own hook. Remove it
+  with `.dev/install-git-hooks.sh --uninstall`.
+- Claude Code turns (opt-in, per clone): `.dev/claude-stop-check.sh` is a
+  `Stop` hook that runs `.dev/lint.sh check --changed` once when Claude
+  finishes a turn with Go changes since HEAD and reports problems back to
+  Claude. It does not run after individual tool calls and does not change
+  files. The repository does not enable it and does not track `.claude/`, so
+  Claude Code settings are local to each clone and are not distributed. To
+  enable the hook, add it to your own
+  `.claude/settings.json` (or `.claude/settings.local.json`):
+
+  ```json
+  {
+    "hooks": {
+      "Stop": [
+        {
+          "hooks": [
+            {
+              "type": "command",
+              "command": "\"$CLAUDE_PROJECT_DIR\"/.dev/claude-stop-check.sh",
+              "timeout": 180
+            }
+          ]
+        }
+      ]
+    }
+  }
+  ```
+
+Neither hook replaces CI: commits made without the `pre-commit` hook and
+changes made outside Claude Code are still checked there.
 
 ## Contributing
 

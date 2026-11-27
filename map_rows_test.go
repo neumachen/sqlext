@@ -1,3 +1,5 @@
+//go:build integration && pgfixtures
+
 package sqlext
 
 import (
@@ -59,27 +61,10 @@ func TestMapRows(t *testing.T) {
 	mappedRows, err := MapRows(rows)
 	require.NoError(t, err)
 	require.NotNil(t, mappedRows)
-	require.Equal(t, count, len(mappedRows))
+	require.Len(t, mappedRows, count)
 
 	for i := range mappedRows {
-		mappedRow := mappedRows[i]
-		require.NotEmpty(t, mappedRow["testing_datatype_id"].(int64))
-		value, ok := mappedRow["testing_datatype_uuid"]
-		require.True(t, ok)
-		require.NotEmpty(t, value)
-		idStr := string(value.([]uint8))
-
-		data, ok := expectedData[idStr]
-		require.True(t, ok)
-		require.NotNil(t, data)
-
-		require.Equal(t, data.UUID, idStr)
-		require.Equal(t, data.Word, mappedRow["word"].(string))
-		require.Equal(t, data.Paragraph, mappedRow["paragraph"].(string))
-		require.Equal(t, data.CreatedAt, mappedRow["created_at"].(time.Time))
-		mData := json.RawMessage(mappedRow["metadata"].([]byte))
-
-		require.JSONEq(t, string(data.Metadata), string(mData))
+		assertMappedTestingDataType(t, mappedRows[i], expectedData)
 	}
 
 	preparedStatement, err = PrepareStatement(deleteTestingDataTypeQuery)
@@ -97,4 +82,27 @@ func TestMapRows(t *testing.T) {
 	rowsAffected, err := result.RowsAffected()
 	require.NoError(t, err)
 	require.Equal(t, int64(count), rowsAffected)
+}
+
+// assertMappedTestingDataType checks one mapped row against the inserted data
+// with the same UUID.
+func assertMappedTestingDataType(t *testing.T, mappedRow MappedRow, expectedData map[string]TestingDataType) {
+	t.Helper()
+	require.NotEmpty(t, mappedRow["testing_datatype_id"].(int64))
+	value, ok := mappedRow["testing_datatype_uuid"]
+	require.True(t, ok)
+	require.NotEmpty(t, value)
+	idStr := string(value.([]uint8))
+
+	data, ok := expectedData[idStr]
+	require.True(t, ok)
+	require.NotNil(t, data)
+
+	require.Equal(t, data.UUID, idStr)
+	require.Equal(t, data.Word, mappedRow["word"].(string))
+	require.Equal(t, data.Paragraph, mappedRow["paragraph"].(string))
+	require.Equal(t, data.CreatedAt, mappedRow["created_at"].(time.Time))
+	mData := json.RawMessage(mappedRow["metadata"].([]byte))
+
+	require.JSONEq(t, string(data.Metadata), string(mData))
 }

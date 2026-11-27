@@ -4,22 +4,20 @@ import (
 	"context"
 	"os"
 	"os/exec"
-	"path/filepath"
-	"runtime"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 )
 
+// The package in testdata/contract must not compile: every declaration in it
+// uses a type that the ColumnType constraint rejects. testdata is never
+// matched by ./..., so only this test builds it. go test puts its own
+// GOROOT/bin first on PATH, so "go" is the toolchain running the test.
 func TestTypedCompileContract(t *testing.T) {
-	source, err := os.ReadFile("testdata/column_types.invalid.txt")
-	require.NoError(t, err)
-	path := filepath.Join(t.TempDir(), "contract.go")
-	require.NoError(t, os.WriteFile(path, source, 0o600))
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, filepath.Join(runtime.GOROOT(), "bin", "go"), "test", "-mod=readonly", "-gcflags=-e", path)
+	cmd := exec.CommandContext(ctx, "go", "build", "-mod=readonly", "-gcflags=-e", "./testdata/contract")
 	cmd.Env = append(os.Environ(), "GOWORK=off", "GOPROXY=off", "GOSUMDB=off")
 
 	output, err := cmd.CombinedOutput()

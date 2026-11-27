@@ -1,10 +1,11 @@
+//go:build integration
+
 package sqlext_test
 
 import (
 	"context"
 	"database/sql"
 	"fmt"
-	"os"
 	"testing"
 	"time"
 
@@ -14,30 +15,14 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// The PostgreSQL execution tests run only against an explicitly configured,
-// disposable server. Both variables are required, and the server's
-// cluster_name must equal SQLEXT_TEST_POSTGRES_CLUSTER, so that a DSN pointing
-// at a shared database is refused instead of written to. The DSN is never
-// logged.
-const (
-	envPostgresDSN     = "SQLEXT_TEST_POSTGRES_DSN"
-	envPostgresCluster = "SQLEXT_TEST_POSTGRES_CLUSTER"
-)
-
+// The PostgreSQL execution tests are built only with -tags integration and
+// need no fixtures. sqlext.OpenDisposablePostgres refuses servers that are not
+// explicitly configured as disposable; see README.md, "Integration tests".
 func openDisposablePostgres(t *testing.T) *sql.DB {
 	t.Helper()
-	dsn, cluster := os.Getenv(envPostgresDSN), os.Getenv(envPostgresCluster)
-	if dsn == "" || cluster == "" {
-		t.Skipf("set %s and %s to run PostgreSQL execution tests", envPostgresDSN, envPostgresCluster)
-	}
-	db, err := sql.Open("postgres", dsn)
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, db.Close()) })
+	db := sqlext.OpenDisposablePostgres(t)
+	// One connection, so session-level checks see the session the helpers use.
 	db.SetMaxOpenConns(1)
-
-	var got string
-	require.NoError(t, db.QueryRowContext(testContext(t), "SELECT current_setting('cluster_name')").Scan(&got))
-	require.Equal(t, cluster, got, "refusing to run against a server whose cluster_name does not match")
 	return db
 }
 

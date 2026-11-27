@@ -1,3 +1,5 @@
+//go:build integration && pgfixtures
+
 package sqlext
 
 import (
@@ -46,14 +48,7 @@ func TestMapRow(t *testing.T) {
 	)
 	require.NoError(t, err)
 	require.NotNil(t, row)
-	expectedColumns := Columns{
-		"testing_datatype_id",
-		"testing_datatype_uuid",
-		"word",
-		"paragraph",
-		"metadata",
-		"created_at",
-	}
+	expectedColumns := testingDataTypeColumns()
 	mappedRow, err := MapRow(row, expectedColumns)
 	require.NoError(t, err)
 	require.NotNil(t, mappedRow)
