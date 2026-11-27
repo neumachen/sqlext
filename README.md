@@ -137,6 +137,20 @@ if err != nil {
 }
 ```
 
+Named parameters are rewritten to PostgreSQL placeholders (`$1`, `$2`, ...) in
+order of appearance. Text inside string constants, quoted identifiers, comments,
+and dollar-quoted strings is never rewritten. `PrepareStatement` returns an error
+for unterminated literals or comments, and for statements that mix named
+parameters with native placeholders such as `$1`.
+
+PostgreSQL reads adjacent operator characters as one operator, so `x<@name`
+could mean the `<@` operator applied to the column `name` or `<` applied to the
+parameter `@name`. When the characters before a parameter combine with its `@`
+into the built-in operators `<@`, `@@`, `@@@`, or `@-@`, `PrepareStatement`
+returns an error. Add whitespace to choose: `x <@ name` uses the operator,
+`x < @name` uses the parameter, and `x <@ @name` uses both. Other operators
+directly before a parameter, as in `x=@name` or `x||@name`, bind the parameter.
+
 ### Column Mapping
 
 To map SQL query results to struct fields, you can use the `ColumnMapperFunc` and `ColumnMapper` types:
