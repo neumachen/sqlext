@@ -88,6 +88,72 @@ new helpers also satisfy `ColumnBinder`, so they can be used in existing
 `ColumnBinders` collections. Direct `NewRowScanner` use requires every binder to
 also satisfy `ColumnScanner`; legacy-only binders continue to use mapped rows.
 
+Breaking change: column binding rules are removed. `ColumnBindingRules`,
+`DefineColumnBindingRulesFunc` and `ColumnRequired` no longer exist,
+`ColumnBinder` no longer has a `BindingRules` method, and `DefineColumnBinding`
+takes only a column and a binder function.
+
+- Bindings created with `DefineColumnBinding` (whose default rules required
+  every column) and the typed `BindColumn` and `BindNullableColumn` bindings
+  already required their column, so they behave as before.
+  `BindColumnToField` still returns an error when the column is missing from
+  the mapped row and still skips NULL and the zero values it skipped before.
+- Optional columns are no longer supported. A custom `ColumnBinder` whose
+  `BindingRules` reported a column as optional (`RequiredColumn` returning
+  false) used to have a missing column skipped by `BindColumnToField`; that
+  rule is no longer consulted, and a missing column is now an error. Remove
+  bindings for columns a query does not select before binding, for example
+  with `FilterUsingFunc` (see below).
+- To migrate, drop any `ColumnRequired()` argument and any `BindingRules()`
+  call. A custom `ColumnBinder` may keep its `BindingRules` method, but nothing
+  calls it any more.
+
+`FilterUsingFunc` now returns an empty collection instead of the original when
+nothing matches, and an error for a nil callback.
+
+### Selecting and replacing bindings
+
+A record usually describes all of its columns once, while a query may select
+only some of them. Because `NewRowScanner` requires an exact match, narrow the
+bindings to the projection first, and swap a single binding when one query
+needs a different conversion:
+
+```go
+selected := sqlext.Columns{"id", "name"}
+bindings, err := customer.ColumnBinders().FilterUsingFunc(
+    func(i int, b sqlext.ColumnBinders) (bool, error) {
+        return selected.HasColumn(b[i].Column()), nil
+    },
+)
+if err != nil {
+    return nil, err
+}
+bindings, err = bindings.Replace(sqlext.BindColumn("name", func(v string) error {
+    customer.Name = sqlext.ColumnValue[string]{Value: strings.TrimSpace(v), Valid: true}
+    return nil
+}))
+if err != nil {
+    return nil, err
+}
+scanner, err := sqlext.NewRowScanner(rows, bindings)
+```
+
+- `FilterUsingFunc` returns a new collection with the kept binders in their
+  original order; when nothing matches it is empty, never the original. The
+  callback gets a snapshot of the collection taken before filtering starts,
+  which filtering itself never changes; as long as the callback treats it as
+  read-only, every call sees the original collection. Writes to the snapshot
+  are visible to later calls but change neither the receiver nor which
+  binders are returned. A nil callback is an error, and a callback error stops
+  filtering and is returned unchanged with a nil collection.
+- `Replace` returns a new collection in which the one binder whose column name
+  equals the replacement's is swapped, keeping the order. A nil (or typed nil)
+  replacement, an empty name, no match, more than one match or a nil binder in
+  the collection is an error wrapping `ErrColumnMapping`.
+- Both work with typed and legacy binders, never modify the receiver and are
+  shallow: the result holds the same binders, so their setters still write to
+  the same record.
+
 Run the isolated typed tests and example without a database:
 
 ```sh

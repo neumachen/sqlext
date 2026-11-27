@@ -103,5 +103,4 @@ func TestTypedColumnMissingDiffersFromNull(t *testing.T) {
 	err := column.BindColumn(sqlext.MappedRow{})
 	require.ErrorIs(t, err, sqlext.ErrColumnMapping)
 	require.Zero(t, calls)
-	require.True(t, column.BindingRules().RequiredColumn())
 }

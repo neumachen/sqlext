@@ -8,7 +8,7 @@ import (
 )
 
 // ColumnBinder is an interface that represents a column binder.
-// It provides methods to access the column, bind the column, and retrieve binding rules.
+// It provides methods to access the column and bind the column.
 type ColumnBinder interface {
 	// Column returns the Column associated with this ColumnBinder.
 	Column() Column
@@ -16,12 +16,11 @@ type ColumnBinder interface {
 	// BindColumn binds the column to the provided MappedRow.
 	// It returns an error if the binding operation fails.
 	BindColumn(mappedRow MappedRow) error
-
-	// BindingRules returns the ColumnBindingRules associated with this ColumnBinder.
-	BindingRules() ColumnBindingRules
 }
 
-// ColumnBindersFilterFunc is a function type used for filtering ColumnBinders.
+// ColumnBindersFilterFunc decides whether FilterUsingFunc keeps
+// columnBinders[i]. columnBinders is a snapshot of the collection being
+// filtered; see FilterUsingFunc for what the callback may do with it.
 type ColumnBindersFilterFunc func(i int, columnBinders ColumnBinders) (bool, error)
 
 // ColumnBinders is a slice of ColumnBinder.
@@ -40,14 +39,29 @@ func DefineColumnBinders(columnBinder ...ColumnBinder) ColumnBinders {
 	return columnBinders
 }
 
-// FilterUsingFunc filters the ColumnBinders using the provided ColumnBindersFilterFunc.
-// It returns a new ColumnBinders containing only the elements for which the filter function returns true.
+// FilterUsingFunc returns a new ColumnBinders holding, in their original order,
+// the binders for which filterFunc returns true. It is typically used to narrow
+// a record's full set of bindings to the columns a query selects.
+//
+// filterFunc is called once per index, in order, with a snapshot of the
+// receiver taken before filtering starts. Filtering never changes the
+// snapshot, so as long as callbacks treat it as read-only, every call sees the
+// original collection rather than a partially filtered one. Writes a callback
+// makes to the snapshot are visible to later calls but change neither the
+// receiver nor which binders are returned.
+//
+// The result never shares storage with the receiver, and it is empty, not nil
+// and not the receiver, when nothing matches. Filtering is shallow: the
+// returned binders are the receiver's binders, so they share their columns,
+// setters and destinations. A nil filterFunc is an error. If filterFunc
+// returns an error, filtering stops and FilterUsingFunc returns nil and that
+// error unchanged.
 //
 // Example:
 //
 //	binders := DefineColumnBinders(binder1, binder2, binder3)
 //	filteredBinders, err := binders.FilterUsingFunc(func(i int, cb ColumnBinders) (bool, error) {
-//		return cb[i].Column().Name() == "id", nil
+//		return cb[i].Column() == "id", nil
 //	})
 //	if err != nil {
 //		// Handle error
@@ -59,28 +73,73 @@ func (c ColumnBinders) FilterUsingFunc(
 	ColumnBinders,
 	error,
 ) {
-	copied := 0
-	dupColumnBinders := make(ColumnBinders, len(c))
-	copy(dupColumnBinders, c)
+	if filterFunc == nil {
+		return nil, errors.New("filter column binders: nil filter func")
+	}
 
-	for i := 0; i < len(dupColumnBinders); i++ {
-		b, err := filterFunc(i, dupColumnBinders)
+	// original is never handed to the callback, so the binders retained below
+	// are the ones the receiver held when filtering started.
+	original := make(ColumnBinders, len(c))
+	copy(original, c)
+	snapshot := make(ColumnBinders, len(c))
+	copy(snapshot, c)
+
+	filtered := make(ColumnBinders, 0, len(c))
+	for i := range original {
+		keep, err := filterFunc(i, snapshot)
 		if err != nil {
 			return nil, err
 		}
-		if b {
-			dupColumnBinders[copied] = dupColumnBinders[i]
-			copied++
+		if keep {
+			filtered = append(filtered, original[i])
 		}
 	}
-	if copied < 1 {
-		return c, nil
+
+	return filtered, nil
+}
+
+// Replace returns a new ColumnBinders in which the one binder whose Column
+// equals replacement.Column() is replaced by replacement. Order is preserved
+// and the receiver is not modified. Use it to swap a binding, for example to
+// apply a different conversion for one query, without rebuilding the
+// collection. It works with both legacy and typed binders.
+//
+// Replace is shallow: the other binders in the result are the receiver's
+// binders and share their setters and destinations.
+//
+// The error wraps ErrColumnMapping when replacement is nil (including a typed
+// nil), has an empty column name, matches no binder or matches more than one,
+// or when the receiver holds a nil binder.
+func (c ColumnBinders) Replace(replacement ColumnBinder) (ColumnBinders, error) {
+	if internal.IsNil(replacement) {
+		return nil, fmt.Errorf("replace column binder: nil replacement: %w", ErrColumnMapping)
 	}
-	for i := copied; i < len(dupColumnBinders); i++ {
-		dupColumnBinders[i] = nil
+	name := replacement.Column()
+	if name == "" {
+		return nil, fmt.Errorf("replace column binder: empty column name: %w", ErrColumnMapping)
 	}
 
-	return dupColumnBinders[:copied], nil
+	index := -1
+	for i, binder := range c {
+		if internal.IsNil(binder) {
+			return nil, fmt.Errorf("replace column binder %q: nil binder at index %d: %w", name, i, ErrColumnMapping)
+		}
+		if binder.Column() != name {
+			continue
+		}
+		if index >= 0 {
+			return nil, fmt.Errorf("replace column binder %q: duplicate binders: %w", name, ErrColumnMapping)
+		}
+		index = i
+	}
+	if index < 0 {
+		return nil, fmt.Errorf("replace column binder %q: no binder for column: %w", name, ErrColumnMapping)
+	}
+
+	replaced := make(ColumnBinders, len(c))
+	copy(replaced, c)
+	replaced[index] = replacement
+	return replaced, nil
 }
 
 // ColumnBinderFunc is a function type that defines the signature for binding a column to a field.
@@ -108,13 +167,12 @@ func BindColumnToField[T any](bindFunc func(value T) error) ColumnBinderFunc {
 			return errors.New("column binder is nil")
 		}
 
+		// Every bound column must be present in the mapped row. A present
+		// column holding NULL or a zero value is not an error; it is skipped
+		// below.
 		value, found := mappedRow.Get(columnBinder.Column())
 		if !found {
-			if columnBinder.BindingRules().RequiredColumn() {
-				return fmt.Errorf("required column %s not found", columnBinder.Column().String())
-			}
-
-			return nil
+			return fmt.Errorf("required column %s not found", columnBinder.Column().String())
 		}
 
 		if internal.IsNilOrZeroValue(value) {
