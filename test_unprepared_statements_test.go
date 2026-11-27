@@ -1,4 +1,4 @@
-package dbsql
+package sqlext
 
 const insertTestingDataTypeQuery = `
 	INSERT INTO testing_datatypes (

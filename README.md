@@ -1,6 +1,6 @@
-# dbsql
+# sqlext
 
-The `dbsql` package provides a set of utilities and abstractions for working with SQL databases in Go. It aims to simplify the process of managing prepared statements, mapping query results to struct fields, and handling named parameters.
+The `sqlext` (SQL extension) package provides a set of utilities and abstractions for working with SQL databases in Go. It aims to simplify the process of managing prepared statements, mapping query results to struct fields, and handling named parameters.
 
 
 ## Features
@@ -20,34 +20,34 @@ inside the callback. Decode JSON explicitly into your own struct there too.
 ```go
 type Customer struct {
     ID      int64
-    Name    dbsql.ColumnValue[string]
+    Name    sqlext.ColumnValue[string]
     Contact Contact
 }
 
-func (c *Customer) ColumnBinders() dbsql.ColumnBinders {
-    return dbsql.DefineColumnBinders(
-        dbsql.BindColumn("id", func(v int64) error {
+func (c *Customer) ColumnBinders() sqlext.ColumnBinders {
+    return sqlext.DefineColumnBinders(
+        sqlext.BindColumn("id", func(v int64) error {
             c.ID = v
             return nil
         }),
-        dbsql.BindNullableColumn("name", func(v dbsql.ColumnValue[string]) error {
+        sqlext.BindNullableColumn("name", func(v sqlext.ColumnValue[string]) error {
             c.Name = v
             return nil
         }),
-        dbsql.BindColumn("contact", func(v []byte) error {
+        sqlext.BindColumn("contact", func(v []byte) error {
             return json.Unmarshal(v, &c.Contact)
         }),
     )
 }
 ```
 
-Here `dbsql` is `github.com/neumachen/dbsql`, `json` is `encoding/json`, and
+Here `sqlext` is `github.com/neumachen/sqlext`, `json` is `encoding/json`, and
 `Contact` is your application-defined JSON result type. For query results whose
 column names are `id`, `name`, and `contact`, build one scanner and reuse it:
 
 ```go
 var customer Customer
-scanner, err := dbsql.NewRowScanner(rows, customer.ColumnBinders())
+scanner, err := sqlext.NewRowScanner(rows, customer.ColumnBinders())
 if err != nil {
     return nil, err
 }
@@ -79,8 +79,8 @@ database-free executable example is in `typed_example_test.go`.
   assigned; there is no rollback. Scanning the same current row again repeats
   callbacks. Use a new scanner after `NextResultSet` and do not share a scanner
   or its destination record between concurrent goroutines.
-- `errors.Is(err, dbsql.ErrColumnType)` identifies runtime type mismatches;
-  `dbsql.ErrColumnMapping` identifies invalid mapping configuration. Callback
+- `errors.Is(err, sqlext.ErrColumnType)` identifies runtime type mismatches;
+  `sqlext.ErrColumnMapping` identifies invalid mapping configuration. Callback
   errors remain available through `errors.Is` and `errors.As`.
 
 The existing `BindColumnToField` and mapped-row APIs retain their behavior. The
@@ -101,11 +101,20 @@ time; SQL result types and JSON contents are checked at runtime.
 
 ## Installation
 
-To use the `dbsql` package, you can install it using the following command:
+To use the `sqlext` package, you can install it using the following command:
 
 ```
-go get github.com/your-username/dbsql
+go get github.com/neumachen/sqlext
 ```
+
+The module was previously named `github.com/neumachen/dbsql`. To migrate,
+replace that import path with `github.com/neumachen/sqlext` and the `dbsql.`
+qualifier with `sqlext.`. The API is otherwise unchanged; sentinel errors keep
+their identity for `errors.Is`, but their messages now start with `sqlext:`.
+The development database in `.dev/docker-compose.yml` and the default
+connection of the database-backed tests now use the `sqlext_dev` database and
+the `sqlext` user. An existing database created with the old names is not
+migrated.
 
 ## Usage
 
@@ -114,18 +123,18 @@ go get github.com/your-username/dbsql
 Here's an example of how to use the `PreparedStatement` interface:
 
 ```go
-import "github.com/your-username/dbsql"
+import "github.com/neumachen/sqlext"
 
 // Prepare a statement with named parameters
-stmt, err := dbsql.PrepareStatement("SELECT * FROM users WHERE name = @name AND age > @age")
+stmt, err := sqlext.PrepareStatement("SELECT * FROM users WHERE name = @name AND age > @age")
 if err != nil {
     // Handle error
 }
 
 // Bind the named parameters and execute the statement
-rows, err := dbsql.QueryContext(ctx, db, stmt,
-    dbsql.BindParameterValue("name", "John"),
-    dbsql.BindParameterValue("age", 30),
+rows, err := sqlext.QueryContext(ctx, db, stmt,
+    sqlext.BindParameterValue("name", "John"),
+    sqlext.BindParameterValue("age", 30),
 )
 if err != nil {
     // Handle error
@@ -202,10 +211,10 @@ type User struct {
 }
 
 // Define the column mapping functions
-columnMappers := dbsql.ColumnMapperMap{
-    "id":   dbsql.MapColumn[int64](func(v int64) error { u.ID = v; return nil }),
-    "name": dbsql.MapColumn[string](func(v string) error { u.Name = v; return nil }),
-    "age":  dbsql.MapColumn[int](func(v int) error { u.Age = v; return nil }),
+columnMappers := sqlext.ColumnMapperMap{
+    "id":   sqlext.MapColumn[int64](func(v int64) error { u.ID = v; return nil }),
+    "name": sqlext.MapColumn[string](func(v string) error { u.Name = v; return nil }),
+    "age":  sqlext.MapColumn[int](func(v int) error { u.Age = v; return nil }),
 }
 
 // Use the column mappers to map the query result to a User struct
@@ -226,7 +235,7 @@ if err != nil {
     // Handle error
 }
 
-mappedRows, err := dbsql.MapRows(rows)
+mappedRows, err := sqlext.MapRows(rows)
 if err != nil {
     // Handle error
 }
@@ -241,7 +250,7 @@ for _, row := range mappedRows {
 
 ## Testing
 
-The `dbsql` package includes a comprehensive test suite to ensure the reliability of its features. You can run the tests using the following command:
+The `sqlext` package includes a comprehensive test suite to ensure the reliability of its features. You can run the tests using the following command:
 
 ```
 go test -v ./...
@@ -251,8 +260,8 @@ The tests cover a range of scenarios, including error handling, data mapping, an
 
 ## Contributing
 
-If you'd like to contribute to the `dbsql` package, please feel free to submit a pull request or open an issue. Contributions are welcome and appreciated!
+If you'd like to contribute to the `sqlext` package, please feel free to submit a pull request or open an issue. Contributions are welcome and appreciated!
 
 ## License
 
-The `dbsql` package is licensed under the [MIT License](LICENSE).
+The `sqlext` package is licensed under the [MIT License](LICENSE).

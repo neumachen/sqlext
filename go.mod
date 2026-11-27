@@ -1,4 +1,4 @@
-module github.com/neumachen/dbsql
+module github.com/neumachen/sqlext
 
 go 1.22
 

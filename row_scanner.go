@@ -1,10 +1,10 @@
-package dbsql
+package sqlext
 
 import (
 	"database/sql"
 	"fmt"
 
-	"github.com/neumachen/dbsql/internal"
+	"github.com/neumachen/sqlext/internal"
 )
 
 // RowScanner maps one result set to typed callbacks. Call rows.Next before Scan.

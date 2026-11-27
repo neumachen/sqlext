@@ -1,10 +1,10 @@
-package dbsql
+package sqlext
 
 import (
 	"errors"
 	"fmt"
 
-	"github.com/neumachen/dbsql/internal"
+	"github.com/neumachen/sqlext/internal"
 )
 
 // ColumnBinder is an interface that represents a column binder.

@@ -1,4 +1,4 @@
-package dbsql_test
+package sqlext_test
 
 import (
 	"context"
@@ -10,7 +10,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/neumachen/dbsql"
+	"github.com/neumachen/sqlext"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -176,9 +176,9 @@ func openExecDB(t *testing.T) (*sql.DB, *execDriver) {
 	return db, d
 }
 
-func prepareStatement(t *testing.T, query string) dbsql.PreparedStatement {
+func prepareStatement(t *testing.T, query string) sqlext.PreparedStatement {
 	t.Helper()
-	ps, err := dbsql.PrepareStatement(query)
+	ps, err := sqlext.PrepareStatement(query)
 	require.NoError(t, err)
 	return ps
 }
@@ -211,7 +211,7 @@ func TestExecutionThroughDatabaseSQL(t *testing.T) {
 	t.Run("DB query read to the end", func(t *testing.T) {
 		db, d := openExecDB(t)
 		for range 3 {
-			rows, err := dbsql.QueryContext(ctx, db, query, dbsql.BindParameterValue("min", 0))
+			rows, err := sqlext.QueryContext(ctx, db, query, sqlext.BindParameterValue("min", 0))
 			require.NoError(t, err)
 			assert.Equal(t, []int64{1, 2, 3}, readAll(t, rows))
 		}
@@ -221,7 +221,7 @@ func TestExecutionThroughDatabaseSQL(t *testing.T) {
 
 	t.Run("DB query closed early", func(t *testing.T) {
 		db, d := openExecDB(t)
-		rows, err := dbsql.QueryContext(ctx, db, query)
+		rows, err := sqlext.QueryContext(ctx, db, query)
 		require.NoError(t, err)
 		require.True(t, rows.Next())
 		require.NoError(t, rows.Close())
@@ -230,9 +230,9 @@ func TestExecutionThroughDatabaseSQL(t *testing.T) {
 
 	t.Run("DB exec and query row", func(t *testing.T) {
 		db, d := openExecDB(t)
-		_, err := dbsql.ExecContext(ctx, db, prepareStatement(t, "UPDATE numbers SET n = @n"), dbsql.BindParameterValue("n", 1))
+		_, err := sqlext.ExecContext(ctx, db, prepareStatement(t, "UPDATE numbers SET n = @n"), sqlext.BindParameterValue("n", 1))
 		require.NoError(t, err)
-		row, err := dbsql.QueryRowContext(ctx, db, query)
+		row, err := sqlext.QueryRowContext(ctx, db, query)
 		require.NoError(t, err)
 		var v int64
 		require.NoError(t, row.Scan(&v))
@@ -246,9 +246,9 @@ func TestExecutionThroughDatabaseSQL(t *testing.T) {
 			tx, err := db.BeginTx(ctx, nil)
 			require.NoError(t, err)
 
-			_, err = dbsql.ExecContext(ctx, tx, prepareStatement(t, "INSERT INTO numbers VALUES (@n)"), dbsql.BindParameterValue("n", 4))
+			_, err = sqlext.ExecContext(ctx, tx, prepareStatement(t, "INSERT INTO numbers VALUES (@n)"), sqlext.BindParameterValue("n", 4))
 			require.NoError(t, err)
-			rows, err := dbsql.QueryContext(ctx, tx, query)
+			rows, err := sqlext.QueryContext(ctx, tx, query)
 			require.NoError(t, err)
 			if finish == "read to the end" {
 				assert.Len(t, readAll(t, rows), 3)
@@ -256,7 +256,7 @@ func TestExecutionThroughDatabaseSQL(t *testing.T) {
 				require.True(t, rows.Next())
 				require.NoError(t, rows.Close())
 			}
-			row, err := dbsql.QueryRowContext(ctx, tx, query)
+			row, err := sqlext.QueryRowContext(ctx, tx, query)
 			require.NoError(t, err)
 			var v int64
 			require.NoError(t, row.Scan(&v))
@@ -272,7 +272,7 @@ func TestExecutionThroughDatabaseSQL(t *testing.T) {
 		db, d := openExecDB(t)
 		tx, err := db.BeginTx(ctx, nil)
 		require.NoError(t, err)
-		rows, err := dbsql.QueryContext(ctx, tx, query)
+		rows, err := sqlext.QueryContext(ctx, tx, query)
 		require.NoError(t, err)
 		readAll(t, rows)
 		require.NoError(t, tx.Rollback())
@@ -283,7 +283,7 @@ func TestExecutionThroughDatabaseSQL(t *testing.T) {
 
 	t.Run("QueryRow execution error surfaces at Scan", func(t *testing.T) {
 		db, d := openExecDB(t)
-		row, err := dbsql.QueryRowContext(ctx, db, prepareStatement(t, "SELECT fail WHERE x = @x"), dbsql.BindParameterValue("x", 1))
+		row, err := sqlext.QueryRowContext(ctx, db, prepareStatement(t, "SELECT fail WHERE x = @x"), sqlext.BindParameterValue("x", 1))
 		require.NoError(t, err, "execution errors are not reported by QueryRowContext")
 		var v int64
 		require.ErrorIs(t, row.Scan(&v), errFakeExecution)
@@ -292,9 +292,9 @@ func TestExecutionThroughDatabaseSQL(t *testing.T) {
 
 	t.Run("Exec and Query execution errors are returned", func(t *testing.T) {
 		db, d := openExecDB(t)
-		_, err := dbsql.ExecContext(ctx, db, prepareStatement(t, "UPDATE fail"))
+		_, err := sqlext.ExecContext(ctx, db, prepareStatement(t, "UPDATE fail"))
 		require.ErrorIs(t, err, errFakeExecution)
-		rows, err := dbsql.QueryContext(ctx, db, prepareStatement(t, "SELECT fail"))
+		rows, err := sqlext.QueryContext(ctx, db, prepareStatement(t, "SELECT fail"))
 		require.ErrorIs(t, err, errFakeExecution)
 		assert.Nil(t, rows)
 		assertNothingOpen(t, d)
@@ -304,10 +304,10 @@ func TestExecutionThroughDatabaseSQL(t *testing.T) {
 		db, d := openExecDB(t)
 		canceled, cancel := context.WithCancel(ctx)
 		cancel()
-		rows, err := dbsql.QueryContext(canceled, db, query)
+		rows, err := sqlext.QueryContext(canceled, db, query)
 		require.ErrorIs(t, err, context.Canceled)
 		assert.Nil(t, rows)
-		row, err := dbsql.QueryRowContext(canceled, db, query)
+		row, err := sqlext.QueryRowContext(canceled, db, query)
 		require.NoError(t, err)
 		var v int64
 		require.ErrorIs(t, row.Scan(&v), context.Canceled)
@@ -319,8 +319,8 @@ func TestExecutionThroughDatabaseSQL(t *testing.T) {
 		tx, err := db.BeginTx(ctx, nil)
 		require.NoError(t, err)
 		for _, q := range []string{"DELETE FROM numbers; DELETE FROM other", "DELETE FROM numbers WHERE n = @n; DROP TABLE numbers"} {
-			_, err := dbsql.ExecContext(ctx, tx, prepareStatement(t, q), dbsql.BindParameterValue("n", 1))
-			require.ErrorIs(t, err, dbsql.ErrMultipleStatements)
+			_, err := sqlext.ExecContext(ctx, tx, prepareStatement(t, q), sqlext.BindParameterValue("n", 1))
+			require.ErrorIs(t, err, sqlext.ErrMultipleStatements)
 		}
 		require.NoError(t, tx.Commit())
 		assert.Empty(t, d.executedQueries())

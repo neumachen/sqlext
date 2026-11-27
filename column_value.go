@@ -1,4 +1,4 @@
-package dbsql
+package sqlext
 
 import (
 	"bytes"
@@ -14,8 +14,8 @@ type ColumnType interface {
 }
 
 var (
-	ErrColumnType    = errors.New("dbsql: column value has an unexpected type")
-	ErrColumnMapping = errors.New("dbsql: invalid column mapping")
+	ErrColumnType    = errors.New("sqlext: column value has an unexpected type")
+	ErrColumnMapping = errors.New("sqlext: invalid column mapping")
 )
 
 // ColumnValue preserves SQL NULL separately from valid zero values.

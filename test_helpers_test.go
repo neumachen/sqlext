@@ -1,4 +1,4 @@
-package dbsql
+package sqlext
 
 import (
 	"context"
@@ -8,7 +8,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/neumachen/dbsql/internal"
+	"github.com/neumachen/sqlext/internal"
 	"github.com/stretchr/testify/require"
 )
 
@@ -17,7 +17,7 @@ import (
 func PostgresDBCreds(t *testing.T) *url.URL {
 	v := os.Getenv("")
 	if v == "" {
-		v = "postgres://dbsql:dbsql@localhost:5432/dbsql_dev?sslmode=disable"
+		v = "postgres://sqlext:sqlext@localhost:5432/sqlext_dev?sslmode=disable"
 	}
 	u, err := url.Parse(v)
 	require.NoError(t, err)

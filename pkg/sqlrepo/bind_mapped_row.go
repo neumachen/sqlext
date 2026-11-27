@@ -3,13 +3,13 @@ package sqlrepo
 import (
 	"errors"
 
-	"github.com/neumachen/dbsql"
-	"github.com/neumachen/dbsql/internal"
+	"github.com/neumachen/sqlext"
+	"github.com/neumachen/sqlext/internal"
 )
 
 func BindMappedRow(
-	columnBinders dbsql.ColumnBinders,
-	mappedRow dbsql.MappedRow,
+	columnBinders sqlext.ColumnBinders,
+	mappedRow sqlext.MappedRow,
 ) error {
 	if internal.IsNil(columnBinders) {
 		return errors.New("column binders is nil")
@@ -35,12 +35,12 @@ func BindMappedRow(
 
 // RowBinder ...
 type RowBinder interface {
-	ColumnBinders() dbsql.ColumnBinders
+	ColumnBinders() sqlext.ColumnBinders
 }
 
 // BindMappedRows binds the mapped row to the column binders.
 func BindMappedRows[T RowBinder](
-	mappedRows dbsql.MappedRows,
+	mappedRows sqlext.MappedRows,
 ) (
 	[]T,
 	error,

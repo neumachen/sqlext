@@ -1,7 +1,7 @@
-package dbsql
+package sqlext
 
 import (
-	"github.com/neumachen/dbsql/internal"
+	"github.com/neumachen/sqlext/internal"
 )
 
 // ParameterPositions is a struct that represents the positions of parameters in an SQL statement.

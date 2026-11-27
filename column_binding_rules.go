@@ -1,4 +1,4 @@
-package dbsql
+package sqlext
 
 // ColumnBindingRules defines the interface for column binding rules.
 // It provides methods to determine if a column is required.

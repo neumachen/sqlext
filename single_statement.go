@@ -1,4 +1,4 @@
-package dbsql
+package sqlext
 
 import (
 	"errors"
@@ -9,7 +9,7 @@ import (
 // ErrMultipleStatements is returned by Exec, Query, QueryRow and their Context
 // variants when the SQL they would send contains more than one statement. The
 // statement is rejected before anything is sent to the database.
-var ErrMultipleStatements = errors.New("dbsql: multiple SQL statements are not allowed")
+var ErrMultipleStatements = errors.New("sqlext: multiple SQL statements are not allowed")
 
 var (
 	// errUnicodeStringNeedsConformingStrings mirrors the PostgreSQL lexer, which

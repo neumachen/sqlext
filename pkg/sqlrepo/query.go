@@ -3,7 +3,7 @@ package sqlrepo
 import (
 	"context"
 
-	"github.com/neumachen/dbsql"
+	"github.com/neumachen/sqlext"
 )
 
 // QueryContext executes a query that returns rows, typically a SELECT.
@@ -25,9 +25,9 @@ import (
 // reflection, improving performance and compile-time type checking.
 func QueryContext[T RowBinder](
 	ctx context.Context,
-	dbPrepExec dbsql.DB,
-	preparedStatement dbsql.PreparedStatement,
-	binderFuncs dbsql.BindParameterValueFuncs,
+	dbPrepExec sqlext.DB,
+	preparedStatement sqlext.PreparedStatement,
+	binderFuncs sqlext.BindParameterValueFuncs,
 ) ([]T, error) {
 	if len(binderFuncs) > 0 {
 		if err := preparedStatement.BindParameterValues(binderFuncs...); err != nil {
@@ -35,7 +35,7 @@ func QueryContext[T RowBinder](
 		}
 	}
 
-	rows, err := dbsql.QueryContext(
+	rows, err := sqlext.QueryContext(
 		ctx,
 		dbPrepExec,
 		preparedStatement,
@@ -50,7 +50,7 @@ func QueryContext[T RowBinder](
 		}
 	}()
 
-	mappedRows, err := dbsql.MapRows(rows)
+	mappedRows, err := sqlext.MapRows(rows)
 	if err != nil {
 		return nil, err
 	}

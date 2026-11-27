@@ -1,4 +1,4 @@
-package dbsql_test
+package sqlext_test
 
 import (
 	"context"
@@ -9,19 +9,19 @@ import (
 	"time"
 
 	"github.com/lib/pq"
-	"github.com/neumachen/dbsql"
+	"github.com/neumachen/sqlext"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 // The PostgreSQL execution tests run only against an explicitly configured,
 // disposable server. Both variables are required, and the server's
-// cluster_name must equal DBSQL_TEST_POSTGRES_CLUSTER, so that a DSN pointing
+// cluster_name must equal SQLEXT_TEST_POSTGRES_CLUSTER, so that a DSN pointing
 // at a shared database is refused instead of written to. The DSN is never
 // logged.
 const (
-	envPostgresDSN     = "DBSQL_TEST_POSTGRES_DSN"
-	envPostgresCluster = "DBSQL_TEST_POSTGRES_CLUSTER"
+	envPostgresDSN     = "SQLEXT_TEST_POSTGRES_DSN"
+	envPostgresCluster = "SQLEXT_TEST_POSTGRES_CLUSTER"
 )
 
 func openDisposablePostgres(t *testing.T) *sql.DB {
@@ -50,7 +50,7 @@ func testContext(t *testing.T) context.Context {
 
 func createProbeTable(t *testing.T, db *sql.DB) string {
 	t.Helper()
-	table := fmt.Sprintf("dbsql_exec_it_%d", time.Now().UnixNano())
+	table := fmt.Sprintf("sqlext_exec_it_%d", time.Now().UnixNano())
 	_, err := db.ExecContext(testContext(t), "CREATE TABLE "+table+" (n int NOT NULL, tag text NOT NULL)")
 	require.NoError(t, err)
 	t.Cleanup(func() {
@@ -120,17 +120,17 @@ func TestPostgresTransactionOwnership(t *testing.T) {
 			tx, err := db.BeginTx(ctx, nil)
 			require.NoError(t, err)
 
-			result, err := dbsql.ExecContext(ctx, tx, insert, dbsql.BindParameterValue("tag", tag))
+			result, err := sqlext.ExecContext(ctx, tx, insert, sqlext.BindParameterValue("tag", tag))
 			require.NoError(t, err)
 			affected, err := result.RowsAffected()
 			require.NoError(t, err)
 			assert.Equal(t, int64(5), affected)
 
-			rows, err := dbsql.QueryContext(ctx, tx, selectRows, dbsql.BindParameterValue("tag", tag))
+			rows, err := sqlext.QueryContext(ctx, tx, selectRows, sqlext.BindParameterValue("tag", tag))
 			require.NoError(t, err)
 			tc.finish(t, rows)
 
-			row, err := dbsql.QueryRowContext(ctx, tx, count, dbsql.BindParameterValue("tag", tag))
+			row, err := sqlext.QueryRowContext(ctx, tx, count, sqlext.BindParameterValue("tag", tag))
 			require.NoError(t, err)
 			var inTx int
 			require.NoError(t, row.Scan(&inTx))
@@ -155,12 +155,12 @@ func TestPostgresNoStatementLeak(t *testing.T) {
 	before := preparedStatementCount(t, db)
 
 	for range 5 {
-		_, err := dbsql.ExecContext(ctx, db, withArgs, dbsql.BindParameterValue("min", 1))
+		_, err := sqlext.ExecContext(ctx, db, withArgs, sqlext.BindParameterValue("min", 1))
 		require.NoError(t, err)
-		_, err = dbsql.ExecContext(ctx, db, noArgs)
+		_, err = sqlext.ExecContext(ctx, db, noArgs)
 		require.NoError(t, err)
 
-		rows, err := dbsql.QueryContext(ctx, db, withArgs, dbsql.BindParameterValue("min", 2))
+		rows, err := sqlext.QueryContext(ctx, db, withArgs, sqlext.BindParameterValue("min", 2))
 		require.NoError(t, err)
 		var got []int
 		for rows.Next() {
@@ -172,7 +172,7 @@ func TestPostgresNoStatementLeak(t *testing.T) {
 		require.NoError(t, rows.Close())
 		assert.Equal(t, []int{2, 3}, got)
 
-		row, err := dbsql.QueryRowContext(ctx, db, noArgs)
+		row, err := sqlext.QueryRowContext(ctx, db, noArgs)
 		require.NoError(t, err)
 		var a, b string
 		require.NoError(t, row.Scan(&a, &b))
@@ -193,17 +193,17 @@ func TestPostgresSingleStatementPolicy(t *testing.T) {
 		"with parameters":    "INSERT INTO " + table + " VALUES (@n, 'multi'); INSERT INTO " + table + " VALUES (2, 'multi')",
 	} {
 		t.Run(name, func(t *testing.T) {
-			_, err := dbsql.ExecContext(ctx, db, prepareStatement(t, query), dbsql.BindParameterValue("n", 1))
-			require.ErrorIs(t, err, dbsql.ErrMultipleStatements)
+			_, err := sqlext.ExecContext(ctx, db, prepareStatement(t, query), sqlext.BindParameterValue("n", 1))
+			require.ErrorIs(t, err, sqlext.ErrMultipleStatements)
 			assert.Zero(t, countTag(t, db, table, "multi"), "nothing was executed")
 		})
 	}
 
 	t.Run("single statements with and without parameters", func(t *testing.T) {
-		_, err := dbsql.ExecContext(ctx, db, prepareStatement(t, "INSERT INTO "+table+" VALUES (1, 'one;'); "))
+		_, err := sqlext.ExecContext(ctx, db, prepareStatement(t, "INSERT INTO "+table+" VALUES (1, 'one;'); "))
 		require.NoError(t, err)
-		_, err = dbsql.ExecContext(ctx, db, prepareStatement(t, "INSERT INTO "+table+" VALUES (@n, 'one;') /* ; */;"),
-			dbsql.BindParameterValue("n", 2))
+		_, err = sqlext.ExecContext(ctx, db, prepareStatement(t, "INSERT INTO "+table+" VALUES (@n, 'one;') /* ; */;"),
+			sqlext.BindParameterValue("n", 2))
 		require.NoError(t, err)
 		assert.Equal(t, 2, countTag(t, db, table, "one;"))
 	})
@@ -214,7 +214,7 @@ func TestPostgresErrors(t *testing.T) {
 	ctx := testContext(t)
 	divide := prepareStatement(t, "SELECT 1 / (@x::int * 0)")
 
-	row, err := dbsql.QueryRowContext(ctx, db, divide, dbsql.BindParameterValue("x", 1))
+	row, err := sqlext.QueryRowContext(ctx, db, divide, sqlext.BindParameterValue("x", 1))
 	require.NoError(t, err, "database errors are reported by Scan")
 	var v int
 	scanErr := row.Scan(&v)
@@ -222,7 +222,7 @@ func TestPostgresErrors(t *testing.T) {
 	require.ErrorAs(t, scanErr, &pqErr)
 	assert.Equal(t, pq.ErrorCode("22012"), pqErr.Code)
 
-	_, err = dbsql.ExecContext(ctx, db, divide, dbsql.BindParameterValue("x", 1))
+	_, err = sqlext.ExecContext(ctx, db, divide, sqlext.BindParameterValue("x", 1))
 	require.ErrorAs(t, err, &pqErr)
 	assert.Equal(t, pq.ErrorCode("22012"), pqErr.Code)
 
@@ -293,13 +293,13 @@ func TestPostgresSingleStatementUnderStringSettings(t *testing.T) {
 
 			t.Run("helpers reject the hidden statement before sending", func(t *testing.T) {
 				truncate(t)
-				_, err := dbsql.ExecContext(ctx, db, prepareStatement(t, "/* scs-helper */ "+hidden))
-				require.ErrorIs(t, err, dbsql.ErrMultipleStatements)
-				_, err = dbsql.ExecContext(ctx, db, prepareStatement(t, "/* scs-helper */ "+hiddenWithParameter),
-					dbsql.BindParameterValue("n", 1))
-				require.ErrorIs(t, err, dbsql.ErrMultipleStatements)
-				rows, err := dbsql.QueryContext(ctx, db, prepareStatement(t, "/* scs-helper */ "+hidden))
-				require.ErrorIs(t, err, dbsql.ErrMultipleStatements)
+				_, err := sqlext.ExecContext(ctx, db, prepareStatement(t, "/* scs-helper */ "+hidden))
+				require.ErrorIs(t, err, sqlext.ErrMultipleStatements)
+				_, err = sqlext.ExecContext(ctx, db, prepareStatement(t, "/* scs-helper */ "+hiddenWithParameter),
+					sqlext.BindParameterValue("n", 1))
+				require.ErrorIs(t, err, sqlext.ErrMultipleStatements)
+				rows, err := sqlext.QueryContext(ctx, db, prepareStatement(t, "/* scs-helper */ "+hidden))
+				require.ErrorIs(t, err, sqlext.ErrMultipleStatements)
 				assert.Nil(t, rows)
 				assert.Zero(t, countRows(t, db, table, "true"), "nothing reached the server")
 				requireStringSetting(t, db, want)
@@ -320,9 +320,9 @@ func TestPostgresSingleStatementUnderStringSettings(t *testing.T) {
 
 			t.Run("escape strings are accepted and hide nothing", func(t *testing.T) {
 				truncate(t)
-				_, err := dbsql.ExecContext(ctx, db, prepareStatement(t, "/* scs-accepted */ "+escapeHiding))
+				_, err := sqlext.ExecContext(ctx, db, prepareStatement(t, "/* scs-accepted */ "+escapeHiding))
 				require.NoError(t, err)
-				_, err = dbsql.ExecContext(ctx, db, prepareStatement(t, "/* scs-accepted */ "+escapeQuote))
+				_, err = sqlext.ExecContext(ctx, db, prepareStatement(t, "/* scs-accepted */ "+escapeQuote))
 				require.NoError(t, err)
 				assert.Equal(t, 1, countRows(t, db, table, "n = 3"))
 				assert.Zero(t, countRows(t, db, table, "n = 4"), "text inside the escape string was not executed")
@@ -331,13 +331,13 @@ func TestPostgresSingleStatementUnderStringSettings(t *testing.T) {
 
 			t.Run("plain literal with trailing backslash is not rejected by the helpers", func(t *testing.T) {
 				truncate(t)
-				_, err := dbsql.ExecContext(ctx, db, prepareStatement(t, "/* scs-accepted */ "+trailingBackslash))
+				_, err := sqlext.ExecContext(ctx, db, prepareStatement(t, "/* scs-accepted */ "+trailingBackslash))
 				if want == stringsOn {
 					require.NoError(t, err)
 					assert.Equal(t, 1, countRows(t, db, table, `n = 6 AND tag = 'C:\temp\'`))
 					return
 				}
-				require.NotErrorIs(t, err, dbsql.ErrMultipleStatements)
+				require.NotErrorIs(t, err, sqlext.ErrMultipleStatements)
 				var pqErr *pq.Error
 				require.ErrorAs(t, err, &pqErr, "the server, not the helper, rejects it")
 				assert.Equal(t, pq.ErrorCode("42601"), pqErr.Code)

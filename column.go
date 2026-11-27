@@ -1,4 +1,4 @@
-package dbsql
+package sqlext
 
 // Column represents a database column name.
 //

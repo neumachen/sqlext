@@ -1,11 +1,11 @@
-package dbsql
+package sqlext
 
 import (
 	"context"
 	"errors"
 	"fmt"
 
-	"github.com/neumachen/dbsql/internal"
+	"github.com/neumachen/sqlext/internal"
 )
 
 var (

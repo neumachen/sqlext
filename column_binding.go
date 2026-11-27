@@ -1,9 +1,9 @@
-package dbsql
+package sqlext
 
 import (
 	"errors"
 
-	"github.com/neumachen/dbsql/internal"
+	"github.com/neumachen/sqlext/internal"
 )
 
 // DefineColumnBinding creates a new ColumnBinder with the given Column, ColumnBinderFunc,
