@@ -8,14 +8,12 @@ import (
 type MappedRow map[Column]any
 
 func (m MappedRow) Columns() Columns {
-	columnsCount := len(m)
-	if columnsCount < 1 {
+	if len(m) < 1 {
 		return nil
 	}
-	columns := make(Columns, columnsCount)
+	columns := make(Columns, 0, len(m))
 	for column := range m {
-		columns[columnsCount] = column
-		columnsCount--
+		columns = append(columns, column)
 	}
 
 	return columns
