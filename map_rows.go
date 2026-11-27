@@ -2,6 +2,7 @@ package sqlext
 
 import (
 	"database/sql"
+	"fmt"
 )
 
 // MappedRows represents a collection of mapped rows.
@@ -54,6 +55,13 @@ func MapRows(rows *sql.Rows) (MappedRows, error) {
 
 		// Append the mapped row to the result
 		result = append(result, rowMap)
+	}
+
+	// Next returns false both at the end of the rows and when the driver
+	// fails mid-iteration; only Err tells them apart. Returning the rows read
+	// so far would present a truncated result as complete.
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate rows: %w", err)
 	}
 
 	return result, nil
