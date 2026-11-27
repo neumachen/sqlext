@@ -182,6 +182,12 @@ connection of the database-backed tests now use the `sqlext_dev` database and
 the `sqlext` user. An existing database created with the old names is not
 migrated.
 
+The optional helper package `github.com/neumachen/sqlext/pkg/sqlrepo`
+(`QueryContext`, `BindMappedRow`, `BindMappedRows` and `RowBinder`) has been
+removed; this breaks code that imports it. Use the root package instead:
+`NewRowScanner` for typed rows, or `MapRows` and each binder's `BindColumn`
+for mapped rows.
+
 ## Usage
 
 ### Prepared Statements
