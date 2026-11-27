@@ -20,6 +20,10 @@ run:
   # golangci-lint v2 disables the run timeout by default; keep the explicit
   # five-minute limit this project used with v1.
   timeout: 5m
+  # Lint the integration tests too; they are only built with these tags.
+  build-tags:
+    - integration
+    - pgfixtures
 
 linters:
   default: none

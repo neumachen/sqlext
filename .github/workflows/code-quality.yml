@@ -23,9 +23,62 @@ jobs:
           go-version: "1.26"
           cache: false
 
-      # golangci-lint-action v7+ is required for golangci-lint v2 (and the
-      # version "2" .golangci.yml); v3 only installs golangci-lint v1.
+      # EXPECTED_VERSION in .dev/lint.sh is the single source of the
+      # golangci-lint version for local checks and both steps below.
+      - name: golangci-lint version
+        id: golangci-lint-version
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=$(sed -n 's/^EXPECTED_VERSION=//p' .dev/lint.sh)
+          if ! printf '%s\n' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error file=.dev/lint.sh::EXPECTED_VERSION=<x.y.z> not found"
+            exit 1
+          fi
+          echo "version=$version" >>"$GITHUB_OUTPUT"
+
+      # Lint, with inline annotations. golangci-lint-action v7+ is required for
+      # golangci-lint v2 (and the version "2" .golangci.yml).
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v9
         with:
-          version: v2.12.2
+          version: v${{ steps.golangci-lint-version.outputs.version }}
+
+      # Formatting, as `golangci-lint fmt --diff ./...` in `.dev/lint.sh check`:
+      # the formatters in .golangci.yml, failing on any difference. The lint
+      # action does not put golangci-lint on PATH, so this step downloads the
+      # official prebuilt release binary, verifies it against the release
+      # checksums and runs it by absolute path. It also runs when the lint step
+      # failed, so both kinds of problem are reported in one run.
+      - name: golangci-lint fmt
+        if: ${{ !cancelled() && steps.golangci-lint-version.outcome == 'success' }}
+        shell: bash
+        env:
+          VERSION: ${{ steps.golangci-lint-version.outputs.version }}
+        run: |
+          set -euo pipefail
+          case "$RUNNER_ARCH" in
+          X64) arch=amd64 ;;
+          ARM64) arch=arm64 ;;
+          *) echo "::error::unsupported runner architecture $RUNNER_ARCH"; exit 1 ;;
+          esac
+          name="golangci-lint-$VERSION-linux-$arch"
+          url="https://github.com/golangci/golangci-lint/releases/download/v$VERSION"
+          dir="$RUNNER_TEMP/golangci-lint-fmt"
+          mkdir -p "$dir"
+          cd "$dir"
+          curl -fsSL --retry 3 -o "$name.tar.gz" "$url/$name.tar.gz"
+          curl -fsSL --retry 3 -o checksums.txt "$url/golangci-lint-$VERSION-checksums.txt"
+          grep -E "  $name\.tar\.gz\$" checksums.txt | sha256sum --check --strict
+          tar -xzf "$name.tar.gz" "$name/golangci-lint"
+          bin="$dir/$name/golangci-lint"
+          installed=$("$bin" version --short)
+          if [ "${installed#v}" != "$VERSION" ]; then
+            echo "::error::downloaded golangci-lint $installed, expected $VERSION"
+            exit 1
+          fi
+          cd "$GITHUB_WORKSPACE"
+          if ! "$bin" fmt --diff ./...; then
+            echo "::error::formatting differs in the files above; run .dev/lint.sh fmt (or golangci-lint fmt), review and commit the result"
+            exit 1
+          fi

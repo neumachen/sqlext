@@ -11,6 +11,18 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// Statements, names and values repeated across the table-driven tests.
+const (
+	positionalCol1Col2 = "SELECT * FROM table WHERE col1 = $1 AND col2 = $2"
+	positionalCol1     = "SELECT * FROM table WHERE col1 = $1"
+	namedCol1          = "SELECT * FROM table WHERE col1 = @foo"
+	textSomething      = "something"
+	textElse           = "else"
+	textName           = "name"
+	textFoo            = "foo"
+	textBar            = "bar"
+)
+
 type PrepareStatementTest struct {
 	Name                       string
 	UnpreparedStatement        string
@@ -28,10 +40,10 @@ func TestPrepareStatement(t *testing.T) {
 		},
 		{
 			UnpreparedStatement: "SELECT * FROM table WHERE col1 = @name",
-			ExpectedStatement:   "SELECT * FROM table WHERE col1 = $1",
+			ExpectedStatement:   positionalCol1,
 			ExpectedParameterPositions: &ParameterPositions{
 				parameterPositions: map[string][]int{
-					"name": {0},
+					textName: {0},
 				},
 				totalPositions: 1,
 			},
@@ -39,10 +51,10 @@ func TestPrepareStatement(t *testing.T) {
 		},
 		{
 			UnpreparedStatement: "SELECT * FROM table WHERE col1 = @name AND col2 = @occupation",
-			ExpectedStatement:   "SELECT * FROM table WHERE col1 = $1 AND col2 = $2",
+			ExpectedStatement:   positionalCol1Col2,
 			ExpectedParameterPositions: &ParameterPositions{
 				parameterPositions: map[string][]int{
-					"name":       {0},
+					textName:     {0},
 					"occupation": {1},
 				},
 				totalPositions: 2,
@@ -51,10 +63,10 @@ func TestPrepareStatement(t *testing.T) {
 		},
 		{
 			UnpreparedStatement: "SELECT * FROM table WHERE col1 = @name AND col2 = @name",
-			ExpectedStatement:   "SELECT * FROM table WHERE col1 = $1 AND col2 = $2",
+			ExpectedStatement:   positionalCol1Col2,
 			ExpectedParameterPositions: &ParameterPositions{
 				parameterPositions: map[string][]int{
-					"name": {0, 1},
+					textName: {0, 1},
 				},
 				totalPositions: 2,
 			},
@@ -65,8 +77,8 @@ func TestPrepareStatement(t *testing.T) {
 			ExpectedStatement:   "SELECT * FROM table WHERE col1 IN ($1, $2)",
 			ExpectedParameterPositions: &ParameterPositions{
 				parameterPositions: map[string][]int{
-					"something": {0},
-					"else":      {1},
+					textSomething: {0},
+					textElse:      {1},
 				},
 				totalPositions: 2,
 			},
@@ -94,8 +106,8 @@ func TestPrepareStatement(t *testing.T) {
 			ExpectedStatement:   "SELECT * FROM table WHERE col1 = $1 AND col2 IN (SELECT id FROM tabl2 WHERE col10 = $2)",
 			ExpectedParameterPositions: &ParameterPositions{
 				parameterPositions: map[string][]int{
-					"foo": {0},
-					"bar": {1},
+					textFoo: {0},
+					textBar: {1},
 				},
 				totalPositions: 2,
 			},
@@ -103,7 +115,7 @@ func TestPrepareStatement(t *testing.T) {
 		},
 		{
 			UnpreparedStatement: "SELECT * FROM table WHERE col1 = @1234567890 AND col2 = @0987654321",
-			ExpectedStatement:   "SELECT * FROM table WHERE col1 = $1 AND col2 = $2",
+			ExpectedStatement:   positionalCol1Col2,
 			ExpectedParameterPositions: &ParameterPositions{
 				parameterPositions: map[string][]int{
 					"1234567890": {0},
@@ -115,7 +127,7 @@ func TestPrepareStatement(t *testing.T) {
 		},
 		{
 			UnpreparedStatement: "SELECT * FROM table WHERE col1 = @ABCDEFGHIJKLMNOPQRSTUVWXYZ",
-			ExpectedStatement:   "SELECT * FROM table WHERE col1 = $1",
+			ExpectedStatement:   positionalCol1,
 			ExpectedParameterPositions: &ParameterPositions{
 				parameterPositions: map[string][]int{
 					"ABCDEFGHIJKLMNOPQRSTUVWXYZ": {0},
@@ -126,7 +138,7 @@ func TestPrepareStatement(t *testing.T) {
 		},
 		{
 			UnpreparedStatement: "SELECT * FROM table WHERE col1 = @abc123ABC098",
-			ExpectedStatement:   "SELECT * FROM table WHERE col1 = $1",
+			ExpectedStatement:   positionalCol1,
 			ExpectedParameterPositions: &ParameterPositions{
 				parameterPositions: map[string][]int{
 					"abc123ABC098": {0},
@@ -160,7 +172,7 @@ func TestPrepareStatement(t *testing.T) {
 		},
 		{
 			UnpreparedStatement: "SELECT * FROM table WHERE col1 = @first_name AND col2 = @last_name",
-			ExpectedStatement:   "SELECT * FROM table WHERE col1 = $1 AND col2 = $2",
+			ExpectedStatement:   positionalCol1Col2,
 			ExpectedParameterPositions: &ParameterPositions{
 				parameterPositions: map[string][]int{
 					"first_name": {0},
@@ -211,15 +223,15 @@ func TestBindNamedParameterValues(t *testing.T) {
 	tests := []BoundNamedParameterValuesTest{
 		{
 			Name:                "Single String Parameter",
-			UnpreparedStatement: "SELECT * FROM table WHERE col1 = @foo",
+			UnpreparedStatement: namedCol1,
 			BindParameterValues: []TestNamedParameterValue{
 				{
-					Name:  "foo",
-					Value: "bar",
+					Name:  textFoo,
+					Value: textBar,
 				},
 			},
 			ExpectedBoundValues: []any{
-				"bar",
+				textBar,
 			},
 		},
 		{
@@ -227,8 +239,8 @@ func TestBindNamedParameterValues(t *testing.T) {
 			UnpreparedStatement: "SELECT * FROM table WHERE col1 = @foo AND col2 = @foo2",
 			BindParameterValues: []TestNamedParameterValue{
 				{
-					Name:  "foo",
-					Value: "bar",
+					Name:  textFoo,
+					Value: textBar,
 				},
 				{
 					Name:  "foo2",
@@ -236,7 +248,7 @@ func TestBindNamedParameterValues(t *testing.T) {
 				},
 			},
 			ExpectedBoundValues: []any{
-				"bar",
+				textBar,
 				"bart",
 			},
 		},
@@ -245,13 +257,13 @@ func TestBindNamedParameterValues(t *testing.T) {
 			UnpreparedStatement: "SELECT * FROM table WHERE col1 = @foo AND col2 = @foo",
 			BindParameterValues: []TestNamedParameterValue{
 				{
-					Name:  "foo",
-					Value: "bar",
+					Name:  textFoo,
+					Value: textBar,
 				},
 			},
 			ExpectedBoundValues: []any{
-				"bar",
-				"bar",
+				textBar,
+				textBar,
 			},
 		},
 		{
@@ -260,7 +272,7 @@ func TestBindNamedParameterValues(t *testing.T) {
 			BindParameterValues: []TestNamedParameterValue{
 				{
 					Name:  "str",
-					Value: "foo",
+					Value: textFoo,
 				},
 				{
 					Name:  "int",
@@ -272,7 +284,7 @@ func TestBindNamedParameterValues(t *testing.T) {
 				},
 			},
 			ExpectedBoundValues: []any{
-				"foo",
+				textFoo,
 				1,
 				3.14,
 			},
@@ -282,16 +294,16 @@ func TestBindNamedParameterValues(t *testing.T) {
 			UnpreparedStatement: "SELECT * FROM table WHERE col1 = @foo AND col2 = @bar AND col3 = @foo AND col4 = @foo AND col5 = @bar",
 			BindParameterValues: []TestNamedParameterValue{
 				{
-					Name:  "foo",
-					Value: "something",
+					Name:  textFoo,
+					Value: textSomething,
 				},
 				{
-					Name:  "bar",
-					Value: "else",
+					Name:  textBar,
+					Value: textElse,
 				},
 			},
 			ExpectedBoundValues: []any{
-				"something", "else", "something", "something", "else",
+				textSomething, textElse, textSomething, textSomething, textElse,
 			},
 		},
 		{
@@ -299,7 +311,7 @@ func TestBindNamedParameterValues(t *testing.T) {
 			UnpreparedStatement: "SELECT * FROM table WHERE col1 = @foo AND col2 = @FOO",
 			BindParameterValues: []TestNamedParameterValue{
 				{
-					Name:  "foo",
+					Name:  textFoo,
 					Value: "baz",
 				},
 				{
@@ -313,10 +325,10 @@ func TestBindNamedParameterValues(t *testing.T) {
 		},
 		{
 			Name:                "Nil Parameter",
-			UnpreparedStatement: "SELECT * FROM table WHERE col1 = @foo",
+			UnpreparedStatement: namedCol1,
 			BindParameterValues: []TestNamedParameterValue{
 				{
-					Name:  "foo",
+					Name:  textFoo,
 					Value: pq.Array([]string{}),
 				},
 			},
@@ -326,10 +338,10 @@ func TestBindNamedParameterValues(t *testing.T) {
 		},
 		{
 			Name:                "Casted Type Parameter",
-			UnpreparedStatement: "SELECT * FROM table WHERE col1 = @foo",
+			UnpreparedStatement: namedCol1,
 			BindParameterValues: []TestNamedParameterValue{
 				{
-					Name:  "foo",
+					Name:  textFoo,
 					Value: "'testing'::varchar",
 				},
 			},

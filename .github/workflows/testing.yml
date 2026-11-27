@@ -11,19 +11,64 @@ on:
 
 jobs:
   testing:
-    name: test
+    name: test (Go ${{ matrix.go }})
     runs-on: ubuntu-latest
     timeout-minutes: ${{ inputs.timeout_minutes }}
     strategy:
+      fail-fast: false
       matrix:
-        go: ["1.20", "1.19"]
+        # 1.22 is the minimum in go.mod; 1.26 is the current release line.
+        go: ["1.22", "1.26"]
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-go@v4
+      - uses: actions/setup-go@v6
         with:
           go-version: ${{ matrix.go }}
           cache: false
 
+      # The integration tests are only compiled with their build tags; vet
+      # them here so they keep building without a database.
+      - name: vet
+        run: |
+          go vet ./...
+          go vet -tags integration ./...
+          go vet -tags "integration pgfixtures" ./...
+
+      # Database-free: no test opens a database without -tags integration.
       - name: test
-        run: go test -v ./...
+        run: go test -race -count=1 ./...
+
+  integration:
+    name: integration (PostgreSQL)
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ inputs.timeout_minutes }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.26"
+          cache: false
+
+      # Starts a disposable postgres:16-alpine container (pinned by digest) on
+      # a loopback port and exports SQLEXT_TEST_POSTGRES_* to later steps.
+      - name: start disposable PostgreSQL
+        run: .dev/test-postgres.sh up
+
+      # Missing or wrong configuration fails these tests instead of skipping
+      # them; the count check makes sure the PostgreSQL tests actually ran.
+      - name: integration tests
+        shell: bash
+        run: |
+          go test -tags integration -race -count=1 -v ./... | tee "$RUNNER_TEMP/integration.log"
+          passed=$(grep -c -E '^--- PASS: TestPostgres' "$RUNNER_TEMP/integration.log" || true)
+          echo "PostgreSQL integration tests passed: $passed"
+          test "$passed" -ge 5
+
+      - name: stop disposable PostgreSQL
+        if: always()
+        run: |
+          if [ -n "${SQLEXT_TEST_POSTGRES_STATE:-}" ]; then
+            .dev/test-postgres.sh down "$SQLEXT_TEST_POSTGRES_STATE"
+          fi

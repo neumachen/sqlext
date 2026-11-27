@@ -10,7 +10,7 @@ func IsNil(v any) bool {
 	valueOf := reflect.ValueOf(v)
 
 	switch valueOf.Kind() {
-	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Ptr, reflect.Slice:
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
 		return valueOf.IsNil()
 	}
 
@@ -25,7 +25,7 @@ func IsNilOrZeroValue(v any) bool {
 	valueOf := reflect.ValueOf(v)
 
 	switch valueOf.Kind() {
-	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Ptr, reflect.Slice:
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
 		return valueOf.IsNil() || valueOf.IsZero()
 	case reflect.Int:
 		return valueOf.IsZero()

@@ -1,7 +1,6 @@
 package sqlext
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"math/rand"
@@ -85,7 +84,7 @@ func (t *TestingDataType) BindMappedRow(mappedRow MappedRow) error {
 	return nil
 }
 
-func (t TestingDataType) ParameterValues() []BindParameterValueFunc {
+func (t *TestingDataType) ParameterValues() []BindParameterValueFunc {
 	return []BindParameterValueFunc{
 		BindParameterValue("uuid", t.UUID),
 		BindParameterValue("word", t.Word),
@@ -176,47 +175,4 @@ func NewFakeCustomerData(t *testing.T) Customer {
 	}
 
 	return c
-}
-
-func CreateNewCustomerForTesting(t *testing.T) *Customer {
-	t.Helper()
-	db := ConnectToDatabase(t)
-	defer CloseDB(t, db)
-
-	createCustomer := NewFakeCustomerData(t)
-
-	preparedStatement, err := PrepareStatement(createCustomerQuery)
-	require.NoError(t, err, "failed to convert to positional params")
-
-	rows, err := QueryContext(
-		context.TODO(),
-		db,
-		preparedStatement,
-		createCustomer.ParameterValues(t)...,
-	)
-	require.NoError(t, err, "failed to query creating customer")
-	require.NotNil(t, rows)
-	mappedRows, err := MapRows(rows)
-	require.NoError(t, err, "failed to map rows")
-	require.NotNil(t, mappedRows)
-	require.Equal(t, 1, len(mappedRows))
-
-	addr := Address{}
-	err = json.Unmarshal(mappedRows[0]["address"].([]uint8), &addr)
-	require.NoError(t, err)
-
-	createdCustomer := &Customer{
-		CustomerID: mappedRows[0]["customer_id"].(int64),
-		LastName:   mappedRows[0]["last_name"].(string),
-		FirstName:  mappedRows[0]["first_name"].(string),
-		Address:    &addr,
-	}
-
-	b, err := json.Marshal(createCustomer)
-	require.NoError(t, err)
-
-	err = json.Unmarshal(b, &createdCustomer)
-	require.NoError(t, err)
-
-	return createdCustomer
 }

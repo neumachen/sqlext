@@ -28,5 +28,5 @@ jobs:
     name: Code Testing
     uses: ./.github/workflows/testing.yml
     with:
-      timeout_minutes: 5
+      timeout_minutes: 10
     secrets: inherit

@@ -32,6 +32,14 @@ type (
 
 var errFixtureUnsupported = errors.New("fixture supports QueryContext only")
 
+// Column names and values shared by the typed scanning tests.
+const (
+	idColumn    = "id"
+	nameColumn  = "name"
+	otherColumn = "other"
+	adaName     = "Ada"
+)
+
 func (c scanConnector) Connect(context.Context) (driver.Conn, error) { return scanConnection(c), nil }
 func (c scanConnector) Driver() driver.Driver                        { return scanDriver(c) }
 func (d scanDriver) Open(string) (driver.Conn, error)                { return scanConnection(d), nil }
