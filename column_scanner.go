@@ -71,9 +71,3 @@ func (c *typedColumn[T]) BindColumn(row MappedRow) error {
 	}
 	return c.Scan(value)
 }
-
-func (*typedColumn[T]) BindingRules() ColumnBindingRules { return requiredTypedColumn{} }
-
-type requiredTypedColumn struct{}
-
-func (requiredTypedColumn) RequiredColumn() bool { return true }

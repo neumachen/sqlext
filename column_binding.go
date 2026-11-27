@@ -6,42 +6,28 @@ import (
 	"github.com/neumachen/sqlext/internal"
 )
 
-// DefineColumnBinding creates a new ColumnBinder with the given Column, ColumnBinderFunc,
-// and optional DefineColumnBindingRulesFunc. It applies the default binding rules and
-// any additional rules specified by the DefineColumnBindingRulesFunc.
+// DefineColumnBinding creates a new ColumnBinder that binds column from a
+// MappedRow through binderFunc.
 //
 // Example:
 //
-//	column := NewColumn("id", "INT")
-//	binderFunc := func(cb ColumnBinder, mr MappedRow) error {
-//		// Binding logic here
+//	binder := DefineColumnBinding("id", BindColumnToField(func(v int64) error {
+//		record.ID = v
 //		return nil
-//	}
-//	customRuleFunc := func(rules *ColumnBindingRules) {
-//		rules.AllowNull = true
-//	}
-//	binder := DefineColumnBinding(column, binderFunc, customRuleFunc)
+//	}))
 func DefineColumnBinding(
 	column Column,
 	binderFunc ColumnBinderFunc,
-	defineRulesFuncs ...DefineColumnBindingRulesFunc,
 ) ColumnBinder {
-	bindingRules := defaultColumnBindingRules
-	for i := range defineRulesFuncs {
-		defineRulesFuncs[i](bindingRules)
-	}
-
 	return &columnBinding{
-		column:       column,
-		binderFunc:   binderFunc,
-		bindingRules: bindingRules,
+		column:     column,
+		binderFunc: binderFunc,
 	}
 }
 
 type columnBinding struct {
-	column       Column
-	binderFunc   ColumnBinderFunc
-	bindingRules ColumnBindingRules
+	column     Column
+	binderFunc ColumnBinderFunc
 }
 
 func (c columnBinding) Column() Column {
@@ -53,8 +39,4 @@ func (c columnBinding) BindColumn(mappedRow MappedRow) error {
 		return errors.New("column binding has nil binder func")
 	}
 	return c.binderFunc(mappedRow, c)
-}
-
-func (c columnBinding) BindingRules() ColumnBindingRules {
-	return c.bindingRules
 }
