@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/neumachen/sqlext"
-	"github.com/neumachen/sqlext/pkg/sqlrepo"
 	"github.com/stretchr/testify/require"
 )
 
@@ -91,8 +90,12 @@ func TestTypedColumnLegacyComposition(t *testing.T) {
 		sqlext.BindColumn(idColumn, func(v int64) error { id = v; return nil }),
 		sqlext.DefineColumnBinding(nameColumn, sqlext.BindColumnToField(func(v string) error { name = v; return nil })),
 	)
-	err := sqlrepo.BindMappedRow(columns, sqlext.MappedRow{idColumn: int64(7), nameColumn: adaName})
-	require.NoError(t, err)
+	row := sqlext.MappedRow{idColumn: int64(7), nameColumn: adaName}
+	require.Len(t, columns, 2)
+	for _, column := range columns {
+		require.NoError(t, column.BindColumn(row), "bind column %q", column.Column())
+	}
+	require.Equal(t, []sqlext.Column{idColumn, nameColumn}, []sqlext.Column{columns[0].Column(), columns[1].Column()})
 	require.Equal(t, int64(7), id)
 	require.Equal(t, adaName, name)
 }
