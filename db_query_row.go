@@ -8,7 +8,7 @@ import (
 // QueryRow executes the prepared SQL statement as a query with the bound parameters.
 // It uses the default background context. See QueryRowContext for details.
 func QueryRow(
-	dbPrepExec DBPreparerExecutor,
+	executor DBQueryRowerContext,
 	preparedStatement PreparedStatement,
 	binderFuncs ...BindParameterValueFunc,
 ) (
@@ -17,14 +17,15 @@ func QueryRow(
 ) {
 	return QueryRowContext(
 		context.Background(),
-		dbPrepExec,
+		executor,
 		preparedStatement,
 		binderFuncs...,
 	)
 }
 
 // QueryRowContext binds the parameter values and runs the rewritten statement
-// with dbPrepExec.QueryRowContext. dbPrepExec may be a *sql.DB or a *sql.Tx.
+// with executor.QueryRowContext, the only executor method it calls. executor
+// may be a *sql.DB, a *sql.Tx or a *sql.Conn.
 //
 // As with database/sql, database errors, including errors that previously
 // came from preparing the statement, are reported by the returned row's Scan
@@ -37,14 +38,14 @@ func QueryRow(
 // per-call values, and the concurrency rules are the same as for ExecContext.
 func QueryRowContext(
 	ctx context.Context,
-	dbPrepExec DBPreparerExecutor,
+	executor DBQueryRowerContext,
 	preparedStatement PreparedStatement,
 	binderFuncs ...BindParameterValueFunc,
 ) (
 	*sql.Row,
 	error,
 ) {
-	reset, err := startExecution(dbPrepExec, preparedStatement)
+	reset, err := startExecution(executor, preparedStatement)
 	defer reset()
 	if err != nil {
 		return nil, err
@@ -55,7 +56,7 @@ func QueryRowContext(
 		return nil, err
 	}
 
-	row := dbPrepExec.QueryRowContext(contextOrBackground(ctx), query, args...)
+	row := executor.QueryRowContext(contextOrBackground(ctx), query, args...)
 	if row == nil {
 		// database/sql never returns a nil row, but other executors can, and
 		// Scan on a nil *sql.Row panics.

@@ -55,6 +55,27 @@ type DBExecutor interface {
 	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
 }
 
+// DBExecerContext is the executor accepted by Exec and ExecContext, which call
+// only ExecContext. *sql.DB, *sql.Tx and *sql.Conn implement it, as does every
+// DBExecutor.
+type DBExecerContext interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+}
+
+// DBQueryerContext is the executor accepted by Query and QueryContext, which
+// call only QueryContext. *sql.DB, *sql.Tx and *sql.Conn implement it, as does
+// every DBExecutor.
+type DBQueryerContext interface {
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+}
+
+// DBQueryRowerContext is the executor accepted by QueryRow and
+// QueryRowContext, which call only QueryRowContext. *sql.DB, *sql.Tx and
+// *sql.Conn implement it, as does every DBExecutor.
+type DBQueryRowerContext interface {
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
+
 // DBPreparerExecutor defines an interface for preparing and executing SQL operations.
 // It combines the Preparer and Executor interfaces, providing methods for
 // creating prepared statements and executing SQL operations.

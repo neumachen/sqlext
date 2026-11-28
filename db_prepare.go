@@ -24,14 +24,18 @@ var (
 // statement's bound values after every call, including one rejected for a nil
 // executor, as earlier versions did for all statements. Nothing is reset for a
 // nil statement, whose methods cannot be called.
-func startExecution(dbExec DBExecutor, statement PreparedStatement) (reset func(), err error) {
+//
+// executor is whichever single-method executor interface the caller accepts;
+// it is only checked for nil here, including a typed nil pointer inside the
+// interface, so it is taken as any.
+func startExecution(executor any, statement PreparedStatement) (reset func(), err error) {
 	reset = func() {}
 	if !internal.IsNil(statement) {
 		if _, builtIn := statement.(*preparedStatement); !builtIn {
 			reset = statement.ResetParametersValues
 		}
 	}
-	if internal.IsNil(dbExec) {
+	if internal.IsNil(executor) {
 		return reset, errNilExecutor
 	}
 	if internal.IsNil(statement) {
