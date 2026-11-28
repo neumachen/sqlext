@@ -16,11 +16,11 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      # go.mod requires Go >= 1.22; 1.26 is the Go release golangci-lint
-      # v2.12.2 is built with.
+      # go.mod requires Go >= 1.27; golangci-lint v2.15.0 is built with Go
+      # 1.27 and cannot lint a module targeting a newer Go version.
       - uses: actions/setup-go@v6
         with:
-          go-version: "1.26"
+          go-version: "1.27"
           cache: false
 
       # EXPECTED_VERSION in .dev/lint.sh is the single source of the

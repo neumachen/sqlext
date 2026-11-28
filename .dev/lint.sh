@@ -17,7 +17,7 @@ set -euo pipefail
 
 # CI uses this version for lint and formatting: .github/workflows/code-quality.yml
 # reads it from this line, so keep it in the form EXPECTED_VERSION=<x.y.z>.
-EXPECTED_VERSION=2.12.2
+EXPECTED_VERSION=2.15.0
 
 # Work from the physical path: golangci-lint matches issues to changed lines
 # by absolute path, and a symlinked path (such as /tmp on macOS) would make

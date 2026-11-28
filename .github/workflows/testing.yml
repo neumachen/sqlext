@@ -11,20 +11,16 @@ on:
 
 jobs:
   testing:
-    name: test (Go ${{ matrix.go }})
+    name: test (Go 1.27)
     runs-on: ubuntu-latest
     timeout-minutes: ${{ inputs.timeout_minutes }}
-    strategy:
-      fail-fast: false
-      matrix:
-        # 1.22 is the minimum in go.mod; 1.26 is the current release line.
-        go: ["1.22", "1.26"]
     steps:
       - uses: actions/checkout@v6
 
+      # 1.27 is both the minimum in go.mod and the current release line.
       - uses: actions/setup-go@v6
         with:
-          go-version: ${{ matrix.go }}
+          go-version: "1.27"
           cache: false
 
       # The integration tests are only compiled with their build tags; vet
@@ -48,7 +44,7 @@ jobs:
 
       - uses: actions/setup-go@v6
         with:
-          go-version: "1.26"
+          go-version: "1.27"
           cache: false
 
       # Starts a disposable postgres:16-alpine container (pinned by digest) on
