@@ -267,11 +267,23 @@ interfaces.
   statements through `database/sql` directly.
 - `QueryRow` and `QueryRowContext` follow `database/sql`: database errors are
   reported by the row's `Scan`. Their error result only reports problems found
-  before the database is contacted, such as nil arguments, a rejected statement
-  or a binder error.
-- Unbound parameter names are sent as NULL and names that do not occur in the
-  statement are ignored. How bound values carry over between calls is
-  described below.
+  before the database is contacted, such as nil arguments, a rejected statement,
+  a binder error or an unknown parameter name.
+- Unbound parameter names are sent as NULL, and so are parameters bound to
+  `nil`. How bound values carry over between calls is described below.
+- Binding a name that does not occur as a named parameter in a statement from
+  `PrepareStatement` returns an error wrapping `ErrUnknownParameter` that names
+  the parameter; this includes binding any name to a statement without named
+  parameters. Names match exactly. A misspelled per-call name therefore fails
+  the call before the database is contacted, instead of sending NULL or the
+  default for the intended parameter. `stmt.BindParameterValue` rejects such a
+  name the same way and leaves the defaults unchanged.
+
+Breaking change: names that do not occur in the statement used to be ignored.
+They are now rejected with `ErrUnknownParameter`, by direct binding and by
+per-call binders. Remove binders for names the statement does not use. Other
+`PreparedStatement` implementations are unaffected; they decide for themselves
+how to treat names.
 
 #### Defaults, per-call values and concurrency
 

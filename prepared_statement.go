@@ -1,6 +1,8 @@
 package sqlext
 
 import (
+	"errors"
+	"fmt"
 	"sync"
 
 	"github.com/neumachen/sqlext/internal"
@@ -46,6 +48,13 @@ func (p *ParameterPositions) insert(parameter string, position int) {
 	p.totalPositions++
 }
 
+// ErrUnknownParameter is returned when a value is bound to a name that does
+// not occur as a named parameter in a statement returned by PrepareStatement,
+// including a statement without named parameters. Names match exactly, so a
+// misspelled name is reported instead of leaving the intended parameter NULL.
+// The returned error wraps ErrUnknownParameter and names the parameter.
+var ErrUnknownParameter = errors.New("sqlext: unknown parameter")
+
 // BoundParameterValues is a type alias for a slice of any (an empty interface).
 // It represents the positional parameters in an SQL statement.
 type BoundParameterValues []any
@@ -57,7 +66,9 @@ type BoundParameterValues []any
 // BindParameterValue or BindParameterValues are defaults: Exec, Query, QueryRow
 // and their Context variants send them on every call until
 // ResetParametersValues clears them, whether the calls succeed or fail. Binders
-// passed to those functions override the defaults for that call only. Such a
+// passed to those functions override the defaults for that call only. Binding
+// a name that does not occur in the statement, directly or per call, returns
+// an error wrapping ErrUnknownParameter and binds nothing. Such a
 // statement may be shared between goroutines: direct binds, reads, resets and
 // executions are synchronized, and each execution works on its own copy of the
 // defaults. The copies are shallow; see ExecContext.
@@ -156,11 +167,12 @@ func (p *preparedStatement) ParameterPositions() *ParameterPositions {
 
 // BindParameterValue binds a default value to a named parameter in the SQL
 // statement. The value is kept until it is bound again or the values are reset.
+// A name that does not occur in the statement returns an error wrapping
+// ErrUnknownParameter and leaves the defaults unchanged.
 func (p *preparedStatement) BindParameterValue(parameterName string, bindValue any) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	bindAtPositions(p.boundNamedParamValues, p.namedParamPositions, parameterName, bindValue)
-	return nil
+	return bindAtPositions(p.boundNamedParamValues, p.namedParamPositions, parameterName, bindValue)
 }
 
 // newExecution returns the private state of one execution, starting from a
@@ -213,10 +225,10 @@ func (e *executionStatement) BoundParameterValues() BoundParameterValues {
 	return copyBoundValues(e.values)
 }
 
-// BindParameterValue binds a value for this execution only.
+// BindParameterValue binds a value for this execution only. A name that does
+// not occur in the statement returns an error wrapping ErrUnknownParameter.
 func (e *executionStatement) BindParameterValue(parameterName string, bindValue any) error {
-	bindAtPositions(e.values, e.statement.namedParamPositions, parameterName, bindValue)
-	return nil
+	return bindAtPositions(e.values, e.statement.namedParamPositions, parameterName, bindValue)
 }
 
 // BindParameterValues applies the binders to this execution only.
@@ -231,15 +243,23 @@ func (e *executionStatement) arguments() []any {
 	return copyBoundValues(e.values)
 }
 
-// bindAtPositions stores bindValue at every position of parameterName.
-// Unknown names are ignored.
-func bindAtPositions(values BoundParameterValues, positions *ParameterPositions, parameterName string, bindValue any) {
-	if internal.IsNilOrZeroValue(positions) {
-		return
+// bindAtPositions stores bindValue at every position of parameterName. Every
+// name in the statement has at least one position, so a name without
+// positions, or any name when the statement has no named parameters, is
+// unknown; it is rejected rather than ignored so that a misspelled name cannot
+// silently send NULL or a stale default in place of the intended value.
+func bindAtPositions(values BoundParameterValues, positions *ParameterPositions, parameterName string, bindValue any) error {
+	var at []int
+	if !internal.IsNilOrZeroValue(positions) {
+		at = positions.getPositions(parameterName)
 	}
-	for _, i := range positions.getPositions(parameterName) {
+	if len(at) == 0 {
+		return fmt.Errorf("%w %q: the statement has no parameter with this name", ErrUnknownParameter, parameterName)
+	}
+	for _, i := range at {
 		values[i] = bindValue
 	}
+	return nil
 }
 
 // copyBoundValues returns a shallow copy of values, or nil when there are

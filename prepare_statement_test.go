@@ -592,7 +592,6 @@ func TestPrepareStatementBindsByPosition(t *testing.T) {
 		BindParameterValue("名前", "ü"),
 		BindParameterValue("b", 2),
 		BindParameterValue("c", nil),
-		BindParameterValue("unused", "ignored"),
 	)
 	require.NoError(t, err)
 	assert.Equal(t, BoundParameterValues{"ü", 2, "ü", nil, 2}, stmt.BoundParameterValues())

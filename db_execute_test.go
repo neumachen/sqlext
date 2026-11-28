@@ -145,7 +145,6 @@ func TestExecutionHelpersExecuteDirectlyWithBoundValues(t *testing.T) {
 				BindParameterValue("c", nil),
 				BindParameterValue("f", false),
 				BindParameterValue("s", ""),
-				BindParameterValue("unknown", 99),
 			)
 			require.NoError(t, err)
 			require.Len(t, db.calls, 1, "exactly one executor call and no Prepare")
