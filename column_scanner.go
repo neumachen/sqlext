@@ -18,14 +18,15 @@ func BindColumn[T ColumnType](column Column, set func(T) error) ColumnScanner {
 		return &typedColumn[T]{column: column}
 	}
 	return BindNullableColumn(column, func(value ColumnValue[T]) error {
-		if !value.Valid {
+		if value.IsNull() {
 			return nil
 		}
-		return set(value.Value)
+		return set(value.Value())
 	})
 }
 
-// BindNullableColumn calls set for every value, including SQL NULL (Valid=false).
+// BindNullableColumn calls set for every value, including SQL NULL
+// (IsNull reports true).
 func BindNullableColumn[T ColumnType](column Column, set func(ColumnValue[T]) error) ColumnScanner {
 	return &typedColumn[T]{column: column, set: set}
 }

@@ -19,7 +19,7 @@ func TestTypedColumnNullModes(t *testing.T) {
 		require.Zero(t, calls)
 	})
 	t.Run("nullable setter observes null", func(t *testing.T) {
-		got := sqlext.ColumnValue[string]{Value: "previous", Valid: true}
+		got := sqlext.NewColumnValue("previous")
 		calls := 0
 		column := sqlext.BindNullableColumn(nameColumn, func(v sqlext.ColumnValue[string]) error {
 			got = v

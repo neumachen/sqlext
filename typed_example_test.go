@@ -64,9 +64,9 @@ func ExampleNewRowScanner() {
 		return
 	}
 	for _, customer := range customers {
-		fmt.Printf("id=%d name=%q valid=%t email=%q\n", customer.ID, customer.Name.Value, customer.Name.Valid, customer.Contact.Email)
+		fmt.Printf("id=%d name=%q null=%t email=%q\n", customer.ID, customer.Name.Value(), customer.Name.IsNull(), customer.Contact.Email)
 	}
 	// Output:
-	// id=7 name="Ada" valid=true email="ada@example.test"
-	// id=8 name="" valid=false email=""
+	// id=7 name="Ada" null=false email="ada@example.test"
+	// id=8 name="" null=true email=""
 }
