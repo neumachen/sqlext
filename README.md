@@ -262,8 +262,53 @@ or `QueryRowContext` method. The executor can be a `*sql.DB` or a `*sql.Tx`.
   reported by the row's `Scan`. Their error result only reports problems found
   before the database is contacted, such as nil arguments, a rejected statement
   or a binder error.
-- Bound values are reset after every call. Unbound parameter names are sent as
-  NULL and names that do not occur in the statement are ignored.
+- Unbound parameter names are sent as NULL and names that do not occur in the
+  statement are ignored. How bound values carry over between calls is
+  described below.
+
+#### Defaults, per-call values and concurrency
+
+For a statement returned by `PrepareStatement`:
+
+- Values bound directly on the statement, with `stmt.BindParameterValue` or
+  `stmt.BindParameterValues`, are defaults. Every call sends them until
+  `stmt.ResetParametersValues()` clears them. Calls never reset them, whether
+  they succeed or fail.
+- Binders passed to `Exec`, `Query`, `QueryRow` or their `Context` variants
+  override the defaults for that call only and are never stored. Binding a
+  parameter to `nil` sends NULL for that call even when a default is set. A
+  binder that fails stops the call before the database is contacted and
+  leaves the defaults as they were.
+- Each call copies the defaults after the single-statement check and applies
+  its binders to that private copy, without holding the statement's lock.
+  Binders therefore receive per-call state rather than the statement itself;
+  calling `ResetParametersValues` on it clears the defaults for that call
+  only.
+- The statement may be shared between goroutines. Direct binds, resets,
+  `BoundParameterValues` and calls are synchronized, and overlapping calls do
+  not see each other's per-call values. A call is not affected by default
+  changes made after it copied the defaults. `stmt.BindParameterValues`
+  applies its binders one by one, so a concurrent call can see only some of
+  them.
+- The copies are shallow: the slice of values is copied, the values are not.
+  `BoundParameterValues` returns a copy, and the arguments given to the
+  executor never share storage with the statement, but a bound pointer, map,
+  slice or `[]byte` is shared with the caller and with other calls. Do not
+  modify such a value while a call that uses it may still be running.
+
+Other `PreparedStatement` implementations are handled as before: binders are
+applied to the statement itself, and its `ResetParametersValues` is called
+after every call, whether the call succeeds or fails. `sqlext` adds no
+synchronization for them; whether they can be shared between goroutines
+depends on the implementation.
+
+Compatibility note: values bound directly on a statement from
+`PrepareStatement` used to be reset after every call, so they applied to the
+next call only. They now persist until `ResetParametersValues` is called.
+Code that relied on the automatic reset should pass those values as binders
+to the call or reset the statement itself. `BoundParameterValues` on such a
+statement now returns a copy, so writing to the returned slice no longer
+changes the statement.
 
 Compatibility notes: earlier versions prepared a statement for every call and
 never closed it. Executors no longer receive `Prepare` calls, preparation errors

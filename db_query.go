@@ -32,8 +32,9 @@ func Query(
 // that are still open when the transaction ends. No server-side prepared
 // statement outlives the rows.
 //
-// The single-statement rule, the pre-execution errors, the binding rules and
-// the reset of bound values are the same as for ExecContext.
+// The single-statement rule, the pre-execution errors, the binding rules, the
+// handling of defaults and per-call values, and the concurrency rules are the
+// same as for ExecContext.
 func QueryContext(
 	ctx context.Context,
 	dbPrepExec DBPreparerExecutor,
