@@ -5,9 +5,17 @@ The `sqlext` (SQL extension) package provides a set of utilities and abstraction
 
 ## Features
 
-- **Prepared Statements**: The `PreparedStatement` interface and `preparedStatement` struct simplify the creation, execution, and management of prepared SQL statements with named parameters.
-- **Column Mapping**: The `ColumnMapperFunc` and `ColumnMapper` types allow you to define custom mapping functions to map SQL query results to struct fields.
-- **Row Mapping**: The `MapRow` and `MapRows` functions provide a convenient way to map SQL query results to `MappedRow` and `MappedRows` data structures.
+- **Named parameters**: `PrepareStatement` rewrites `@name` parameters to
+  PostgreSQL placeholders and returns a `PreparedStatement`; values are bound
+  with `BindParameterValue`.
+- **Execution**: `Exec`, `Query`, `QueryRow` and their `Context` variants run
+  one statement through a `*sql.DB`, `*sql.Tx` or `*sql.Conn`.
+- **Typed scanning**: `NewRowScanner` with `BindColumn` and
+  `BindNullableColumn` maps result columns to caller-owned fields.
+  `ColumnValue[T]` keeps SQL NULL apart from zero values, and its
+  `DriverValue` method turns it back into a query argument.
+- **Mapped rows**: `MapRow` and `MapRows` read results into `MappedRow` maps;
+  `DefineColumnBinding` with `BindColumnToField` binds those to fields.
 
 ## Typed column callbacks
 
@@ -343,54 +351,119 @@ from `QueryRow` now surface at `Scan`, and SQL containing several statements is
 now rejected. With lib/pq, statements without parameters use the simple query
 protocol.
 
-### Column Mapping
+### Typed rows and nullable arguments
 
-To map SQL query results to struct fields, you can use the `ColumnMapperFunc` and `ColumnMapper` types:
+Query with the executors above and scan the result with `NewRowScanner`, as
+shown in [Typed column callbacks](#typed-column-callbacks):
+
+```go
+stmt, err := sqlext.PrepareStatement("SELECT id, name, contact FROM customers WHERE id > @after")
+if err != nil {
+    return nil, err
+}
+rows, err := sqlext.QueryContext(ctx, db, stmt, sqlext.BindParameterValue("after", int64(0)))
+if err != nil {
+    return nil, err
+}
+defer rows.Close()
+// NewRowScanner, the rows.Next loop and rows.Err as in "Typed column callbacks".
+```
+
+To send a `ColumnValue` back to the database, pass its `DriverValue()`:
+
+```go
+update, err := sqlext.PrepareStatement("UPDATE customers SET name = @name WHERE id = @id")
+if err != nil {
+    return err
+}
+_, err = sqlext.ExecContext(ctx, db, update,
+    sqlext.BindParameterValue("id", customer.ID),
+    sqlext.BindParameterValue("name", customer.Name.DriverValue()),
+)
+```
+
+- `ColumnValue` does not implement `driver.Valuer`, because its `Value` field
+  takes that method name. Pass the result of `DriverValue`, not the
+  `ColumnValue` itself.
+- An invalid value, including the zero `ColumnValue`, returns `nil`, which is
+  sent as NULL whatever `Value` holds.
+- A valid value returns `Value` unchanged with its exact type, zero values
+  included: `ColumnValue[int64]{Valid: true}` sends `int64(0)`, not NULL.
+- A valid typed nil `[]byte` is returned as a non-nil `driver.Value` holding
+  `[]byte(nil)`, because `Scan` treats it as valid data. The default argument
+  conversion of `database/sql` passes it to the driver unchanged; whether the
+  driver encodes it as empty bytes or as SQL NULL depends on the driver. Use
+  `Valid: false` when you mean NULL.
+- Bytes are not copied: the returned `[]byte` shares its backing array with
+  `Value`, and the bound argument is shared as described in
+  [Defaults, per-call values and concurrency](#defaults-per-call-values-and-concurrency).
+  Do not modify it while a call that uses it may be running.
+
+### Mapped rows
+
+`MapRows` reads every remaining row into a `MappedRow`, a map from column name
+to the value the driver returned, without conversion. It returns an error
+when iteration fails; the caller still owns and closes `rows`. Bind a mapped
+row to fields with `DefineColumnBinding` and `BindColumnToField`:
 
 ```go
 type User struct {
-    ID        int64
-    Name      string
-    Age       int
+    ID   int64
+    Name string
 }
 
-// Define the column mapping functions
-columnMappers := sqlext.ColumnMapperMap{
-    "id":   sqlext.MapColumn[int64](func(v int64) error { u.ID = v; return nil }),
-    "name": sqlext.MapColumn[string](func(v string) error { u.Name = v; return nil }),
-    "age":  sqlext.MapColumn[int](func(v int) error { u.Age = v; return nil }),
-}
+func readUsers(ctx context.Context, db *sql.DB) ([]User, error) {
+    stmt, err := sqlext.PrepareStatement("SELECT id, name FROM users WHERE id > @after")
+    if err != nil {
+        return nil, err
+    }
+    rows, err := sqlext.QueryContext(ctx, db, stmt, sqlext.BindParameterValue("after", int64(0)))
+    if err != nil {
+        return nil, err
+    }
+    defer rows.Close()
 
-// Use the column mappers to map the query result to a User struct
-row, err := stmt.QueryRow(db)
-user := User{}
-if err := user.mapRow(row, columnMappers); err != nil {
-    // Handle error
+    mappedRows, err := sqlext.MapRows(rows)
+    if err != nil {
+        return nil, err
+    }
+
+    var user User
+    binders := sqlext.DefineColumnBinders(
+        sqlext.DefineColumnBinding("id", sqlext.BindColumnToField(func(v int64) error {
+            user.ID = v
+            return nil
+        })),
+        sqlext.DefineColumnBinding("name", sqlext.BindColumnToField(func(v string) error {
+            user.Name = v
+            return nil
+        })),
+    )
+    var users []User
+    for _, row := range mappedRows {
+        user = User{}
+        for _, binder := range binders {
+            if err := binder.BindColumn(row); err != nil {
+                return nil, err
+            }
+        }
+        users = append(users, user)
+    }
+    return users, nil
 }
 ```
 
-### Row Mapping
+`BindColumnToField` fails when the column is missing from the row or its
+value has a different type. It does not call the callback for NULL, for a nil
+pointer, slice (including a nil `[]byte`), map, channel or function, or for a
+zero `int`. Other zero values, such as `int64(0)`, `0.0`, `false`, `""`, an
+empty non-nil `[]byte` and the zero `time.Time`, are passed to the callback,
+so reset a reused record before each row as above.
 
-You can use the `MapRow` and `MapRows` functions to map SQL query results to `MappedRow` and `MappedRows` data structures:
-
-```go
-rows, err := stmt.Query(db)
-if err != nil {
-    // Handle error
-}
-
-mappedRows, err := sqlext.MapRows(rows)
-if err != nil {
-    // Handle error
-}
-
-for _, row := range mappedRows {
-    // Access the column-value pairs in the mapped row
-    name := row["name"].(string)
-    age := row["age"].(int)
-    // ...
-}
-```
+For a single row, `MapRow` scans a `*sql.Row` into a `MappedRow` using the
+column names you pass, for example
+`sqlext.MapRow(row, sqlext.Columns{"id", "name"})` with the row from
+`QueryRowContext`.
 
 ## Testing
 
