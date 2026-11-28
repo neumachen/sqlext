@@ -44,9 +44,10 @@ func Exec(
 //
 // An error is returned without contacting the database when executor or
 // preparedStatement is nil, including a typed nil pointer, when the statement
-// check fails, or when a binder returns an error; binder errors are wrapped
-// and remain matchable with errors.Is and errors.As. Database errors are
-// returned unchanged.
+// check fails, or when a binder returns an error, including an error wrapping
+// ErrUnknownParameter for a name that does not occur in a statement from
+// PrepareStatement; binder errors are wrapped and remain matchable with
+// errors.Is and errors.As. Database errors are returned unchanged.
 //
 // For a statement from PrepareStatement, values bound directly on it are
 // defaults that every call sends until ResetParametersValues clears them; a
@@ -66,9 +67,13 @@ func Exec(
 // not. sqlext does not synchronize such statements; whether one may be shared
 // between goroutines depends on the implementation.
 //
-// Parameter names that are not bound are sent as NULL, a parameter bound to
-// nil is sent as NULL even when a default is set, and names that do not occur
-// in the statement are ignored.
+// Parameter names that are not bound are sent as NULL, and a parameter bound
+// to nil is sent as NULL even when a default is set. For a statement from
+// PrepareStatement, binding a name that does not occur in the statement, or
+// any name when it has no named parameters, is an error wrapping
+// ErrUnknownParameter; names match exactly. A per-call binder with such a name
+// fails the call before the database is contacted and leaves the defaults
+// unchanged. Other implementations decide for themselves how to treat names.
 func ExecContext(
 	ctx context.Context,
 	executor DBExecerContext,

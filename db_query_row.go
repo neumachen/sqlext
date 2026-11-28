@@ -32,7 +32,8 @@ func QueryRow(
 // method, and Scan returns sql.ErrNoRows when there is no row. The error
 // result is non-nil only for problems found before the database is contacted:
 // nil arguments, a statement that is not a single statement, or a binder
-// error. Inside a transaction, call Scan before Commit or Rollback.
+// error, including an unknown parameter name (ErrUnknownParameter). Inside a
+// transaction, call Scan before Commit or Rollback.
 //
 // The single-statement rule, the binding rules, the handling of defaults and
 // per-call values, and the concurrency rules are the same as for ExecContext.
