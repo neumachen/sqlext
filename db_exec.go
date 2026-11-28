@@ -8,7 +8,7 @@ import (
 // Exec executes the prepared SQL statement with the bound parameters.
 // It uses the default background context. See ExecContext for details.
 func Exec(
-	dbPrepExec DBPreparerExecutor,
+	executor DBExecerContext,
 	preparedStatement PreparedStatement,
 	binderFuncs ...BindParameterValueFunc,
 ) (
@@ -17,15 +17,16 @@ func Exec(
 ) {
 	return ExecContext(
 		context.Background(),
-		dbPrepExec,
+		executor,
 		preparedStatement,
 		binderFuncs...,
 	)
 }
 
 // ExecContext binds the parameter values and executes the rewritten statement
-// with dbPrepExec.ExecContext. dbPrepExec may be a *sql.DB or a *sql.Tx; the
-// caller owns any transaction and commits or rolls it back.
+// with executor.ExecContext, the only executor method it calls. executor may
+// be a *sql.DB, a *sql.Tx or a *sql.Conn; the caller owns any transaction or
+// connection and commits, rolls back or closes it.
 //
 // The statement is executed directly rather than through an explicit Prepare,
 // so no server-side prepared statement is left behind per call; database/sql
@@ -41,10 +42,11 @@ func Exec(
 // bodies (BEGIN ATOMIC ... END) are single statements but are rejected, because
 // their inner semicolons cannot be told apart from separators lexically.
 //
-// An error is returned without contacting the database when dbPrepExec or
-// preparedStatement is nil, when the statement check fails, or when a binder
-// returns an error; binder errors are wrapped and remain matchable with
-// errors.Is and errors.As. Database errors are returned unchanged.
+// An error is returned without contacting the database when executor or
+// preparedStatement is nil, including a typed nil pointer, when the statement
+// check fails, or when a binder returns an error; binder errors are wrapped
+// and remain matchable with errors.Is and errors.As. Database errors are
+// returned unchanged.
 //
 // For a statement from PrepareStatement, values bound directly on it are
 // defaults that every call sends until ResetParametersValues clears them; a
@@ -69,14 +71,14 @@ func Exec(
 // in the statement are ignored.
 func ExecContext(
 	ctx context.Context,
-	dbPrepExec DBPreparerExecutor,
+	executor DBExecerContext,
 	preparedStatement PreparedStatement,
 	binderFuncs ...BindParameterValueFunc,
 ) (
 	sql.Result,
 	error,
 ) {
-	reset, err := startExecution(dbPrepExec, preparedStatement)
+	reset, err := startExecution(executor, preparedStatement)
 	defer reset()
 	if err != nil {
 		return nil, err
@@ -87,5 +89,5 @@ func ExecContext(
 		return nil, err
 	}
 
-	return dbPrepExec.ExecContext(contextOrBackground(ctx), query, args...)
+	return executor.ExecContext(contextOrBackground(ctx), query, args...)
 }

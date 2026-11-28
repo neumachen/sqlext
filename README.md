@@ -232,14 +232,21 @@ directly before a parameter, as in `x=@name` or `x||@name`, bind the parameter.
 
 `Exec`, `Query`, `QueryRow` and their `Context` variants bind the values and
 execute the rewritten SQL through the executor's `ExecContext`, `QueryContext`
-or `QueryRowContext` method. The executor can be a `*sql.DB` or a `*sql.Tx`.
+or `QueryRowContext` method. Each pair accepts an executor with only the method
+it calls: `DBExecerContext` for `Exec` and `ExecContext`, `DBQueryerContext`
+for `Query` and `QueryContext`, and `DBQueryRowerContext` for `QueryRow` and
+`QueryRowContext`. The executor can be a `*sql.DB`, a `*sql.Tx`, a `*sql.Conn`
+or any value of the existing `DBExecutor`, `DBPreparerExecutor` or `DB`
+interfaces.
 
 - No explicit `Prepare` is issued, so no server-side prepared statement is left
   behind per call. `database/sql` and the driver manage any statement they use
   and release it with the result or the rows.
-- The caller owns transactions and returned rows. Read rows until `Next`
-  returns false or call `Close`; inside a transaction, do this before `Commit`
-  or `Rollback`.
+- The caller owns transactions, reserved connections and returned rows. Read
+  rows until `Next` returns false or call `Close`; inside a transaction, do
+  this before `Commit` or `Rollback`, and on a `*sql.Conn` before `Close`.
+- A nil executor, including a typed nil pointer such as a nil `*sql.Conn`, is
+  rejected before the database is contacted.
 - Each call accepts exactly one SQL statement. Trailing semicolons, whitespace
   and comments are allowed, and so are semicolons inside string constants,
   quoted identifiers, comments and dollar-quoted strings. Anything after a
@@ -309,6 +316,14 @@ Code that relied on the automatic reset should pass those values as binders
 to the call or reset the statement itself. `BoundParameterValues` on such a
 statement now returns a copy, so writing to the returned slice no longer
 changes the statement.
+
+Compatibility note: `Exec`, `Query`, `QueryRow` and their `Context` variants
+used to take a `DBPreparerExecutor`; they now take `DBExecerContext`,
+`DBQueryerContext` and `DBQueryRowerContext`. Calls that pass a `*sql.DB`, a
+`*sql.Tx` or a value of an existing interface compile unchanged. Code that
+uses one of these functions as a value of the old function type, for example
+assigns `sqlext.Exec` to a variable or field declared with a
+`DBPreparerExecutor` parameter, must change that type.
 
 Compatibility notes: earlier versions prepared a statement for every call and
 never closed it. Executors no longer receive `Prepare` calls, preparation errors

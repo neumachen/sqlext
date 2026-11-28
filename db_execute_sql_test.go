@@ -328,3 +328,109 @@ func TestExecutionThroughDatabaseSQL(t *testing.T) {
 		assert.Equal(t, []string{"begin", "commit"}, events)
 	})
 }
+
+// A reserved *sql.Conn has only the context methods, so it is accepted only
+// because each helper asks for nothing but the one method it calls.
+func TestExecutionThroughReservedConn(t *testing.T) {
+	ctx := context.Background()
+	query := prepareStatement(t, "SELECT n FROM numbers WHERE n > @min")
+
+	reserve := func(t *testing.T) (*sql.Conn, *execDriver) {
+		t.Helper()
+		db, d := openExecDB(t)
+		conn, err := db.Conn(ctx)
+		require.NoError(t, err)
+		return conn, d
+	}
+
+	t.Run("exec, query and query row", func(t *testing.T) {
+		conn, d := reserve(t)
+
+		result, err := sqlext.ExecContext(ctx, conn, prepareStatement(t, "UPDATE numbers SET n = @n"), sqlext.BindParameterValue("n", 1))
+		require.NoError(t, err)
+		affected, err := result.RowsAffected()
+		require.NoError(t, err)
+		assert.Equal(t, int64(1), affected)
+		_, err = sqlext.Exec(conn, prepareStatement(t, "UPDATE numbers SET n = 2"))
+		require.NoError(t, err)
+
+		rows, err := sqlext.QueryContext(ctx, conn, query, sqlext.BindParameterValue("min", 0))
+		require.NoError(t, err)
+		assert.Equal(t, []int64{1, 2, 3}, readAll(t, rows))
+		rows, err = sqlext.Query(conn, query)
+		require.NoError(t, err)
+		assert.Equal(t, []int64{1, 2, 3}, readAll(t, rows))
+
+		var v int64
+		row, err := sqlext.QueryRowContext(ctx, conn, query, sqlext.BindParameterValue("min", 0))
+		require.NoError(t, err)
+		require.NoError(t, row.Scan(&v))
+		assert.Equal(t, int64(1), v)
+		row, err = sqlext.QueryRow(conn, query)
+		require.NoError(t, err)
+		require.NoError(t, row.Scan(&v))
+
+		require.NoError(t, conn.Close())
+		assertNothingOpen(t, d)
+		selectQuery := query.Revised()
+		assert.Equal(t, []string{
+			"UPDATE numbers SET n = $1",
+			"UPDATE numbers SET n = 2",
+			selectQuery, selectQuery, selectQuery, selectQuery,
+		}, d.executedQueries())
+		assert.Equal(t, "SELECT n FROM numbers WHERE n > $1", selectQuery)
+		assert.Equal(t, []driver.Value{int64(0)}, d.argsAt(2))
+	})
+
+	t.Run("execution errors", func(t *testing.T) {
+		conn, d := reserve(t)
+
+		_, err := sqlext.ExecContext(ctx, conn, prepareStatement(t, "UPDATE fail"))
+		require.ErrorIs(t, err, errFakeExecution)
+		rows, err := sqlext.QueryContext(ctx, conn, prepareStatement(t, "SELECT fail"))
+		require.ErrorIs(t, err, errFakeExecution)
+		assert.Nil(t, rows)
+
+		row, err := sqlext.QueryRowContext(ctx, conn, prepareStatement(t, "SELECT fail WHERE x = @x"), sqlext.BindParameterValue("x", 1))
+		require.NoError(t, err, "execution errors are not reported by QueryRowContext")
+		var v int64
+		require.ErrorIs(t, row.Scan(&v), errFakeExecution)
+
+		require.NoError(t, conn.Close())
+		assertNothingOpen(t, d)
+	})
+
+	t.Run("closed connection", func(t *testing.T) {
+		conn, d := reserve(t)
+		require.NoError(t, conn.Close())
+
+		_, err := sqlext.ExecContext(ctx, conn, query)
+		require.ErrorIs(t, err, sql.ErrConnDone)
+		rows, err := sqlext.QueryContext(ctx, conn, query)
+		require.ErrorIs(t, err, sql.ErrConnDone)
+		assert.Nil(t, rows)
+
+		row, err := sqlext.QueryRowContext(ctx, conn, query)
+		require.NoError(t, err, "the closed connection is reported by Scan")
+		var v int64
+		require.ErrorIs(t, row.Scan(&v), sql.ErrConnDone)
+
+		assert.Empty(t, d.executedQueries())
+	})
+
+	t.Run("multiple statements never reach the driver", func(t *testing.T) {
+		conn, d := reserve(t)
+		multiple := prepareStatement(t, "DELETE FROM numbers; DELETE FROM other")
+
+		_, err := sqlext.ExecContext(ctx, conn, multiple)
+		require.ErrorIs(t, err, sqlext.ErrMultipleStatements)
+		rows, err := sqlext.QueryContext(ctx, conn, multiple)
+		require.ErrorIs(t, err, sqlext.ErrMultipleStatements)
+		assert.Nil(t, rows)
+		_, err = sqlext.QueryRowContext(ctx, conn, multiple)
+		require.ErrorIs(t, err, sqlext.ErrMultipleStatements)
+
+		require.NoError(t, conn.Close())
+		assert.Empty(t, d.executedQueries())
+	})
+}
