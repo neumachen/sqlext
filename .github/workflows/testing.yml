@@ -11,20 +11,34 @@ on:
 
 jobs:
   testing:
-    name: test (Go ${{ matrix.go }})
+    name: test (${{ matrix.label }})
     runs-on: ubuntu-latest
     timeout-minutes: ${{ inputs.timeout_minutes }}
+    # Set before setup-go: go-version-file then reads the go directive, not a
+    # toolchain directive, and go never switches to another toolchain.
+    env:
+      GOTOOLCHAIN: local
     strategy:
       fail-fast: false
       matrix:
-        # 1.22 is the minimum in go.mod; 1.26 is the current release line.
-        go: ["1.22", "1.26"]
+        # Each row sets go-version or go-version-file, never both.
+        include:
+          - label: Go module minimum (go.mod)
+            go-version-file: go.mod
+          - label: Go 1.25
+            go-version: "1.25"
+          - label: Go 1.26
+            go-version: "1.26"
+          - label: Go 1.27
+            go-version: "1.27"
     steps:
       - uses: actions/checkout@v6
 
+      # setup-go ignores an empty go-version and reads go-version-file.
       - uses: actions/setup-go@v6
         with:
-          go-version: ${{ matrix.go }}
+          go-version: ${{ matrix.go-version }}
+          go-version-file: ${{ matrix.go-version-file }}
           cache: false
 
       # The integration tests are only compiled with their build tags; vet
@@ -48,7 +62,7 @@ jobs:
 
       - uses: actions/setup-go@v6
         with:
-          go-version: "1.26"
+          go-version: "1.27"
           cache: false
 
       # Starts a disposable postgres:16-alpine container (pinned by digest) on

@@ -34,8 +34,9 @@ linters:
   # v2 changes from the v1 list:
   # - gosimple and stylecheck are merged into staticcheck (enabled below).
   # - gofmt and goimports are formatters (see `formatters`).
-  # - exportloopref was removed from golangci-lint v2; with Go 1.22 loop
-  #   variable semantics (see go.mod) the bug class it reported no longer exists.
+  # - exportloopref was removed from golangci-lint v2; with the loop variable
+  #   semantics of Go 1.22 and later (see go.mod) the bug class it reported no
+  #   longer exists.
   enable:
     - bodyclose
     - depguard
