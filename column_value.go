@@ -20,10 +20,34 @@ var (
 )
 
 // ColumnValue preserves SQL NULL separately from valid zero values.
-// Its zero value represents NULL.
+// Its zero value represents NULL. Scan fills it from a query result and
+// NewColumnValue builds a valid value; IsNull and Value read it back.
 type ColumnValue[T ColumnType] struct {
-	Value T
-	Valid bool
+	value    T
+	hasValue bool
+}
+
+// NewColumnValue returns a valid, non-NULL ColumnValue holding value. Zero
+// values are valid data, and so is a typed nil []byte: NewColumnValue([]byte(nil))
+// is not NULL. Use the zero ColumnValue for NULL.
+//
+// Bytes are not copied: the result shares its backing array with value, and so
+// do Value and DriverValue. The caller keeps ownership of value; do not modify
+// it while the ColumnValue, or a call that uses its DriverValue, may still read
+// it. Scan, by contrast, always copies the bytes it retains.
+func NewColumnValue[T ColumnType](value T) ColumnValue[T] {
+	return ColumnValue[T]{value: value, hasValue: true}
+}
+
+// IsNull reports whether v represents SQL NULL.
+func (v ColumnValue[T]) IsNull() bool {
+	return !v.hasValue
+}
+
+// Value returns the held value, or the zero value of T when v is NULL; use
+// IsNull to tell NULL apart from a valid zero value. Bytes are not copied.
+func (v ColumnValue[T]) Value() T {
+	return v.value
 }
 
 // Scan implements sql.Scanner without implicit type conversion. A nil source
@@ -42,30 +66,29 @@ func (v *ColumnValue[T]) Scan(src any) error {
 	}
 	value, ok := src.(T)
 	if !ok {
-		return fmt.Errorf("%w: got %T, want %T", ErrColumnType, src, v.Value)
+		return fmt.Errorf("%w: got %T, want %T", ErrColumnType, src, v.value)
 	}
-	v.Value = value
-	v.Valid = true
+	v.value = value
+	v.hasValue = true
 	return nil
 }
 
 // DriverValue converts v explicitly for use as a query argument. ColumnValue
-// cannot implement driver.Valuer because its Value field takes the method name,
-// so pass the result as the argument instead of v itself.
+// does not implement driver.Valuer: its Value method returns T rather than
+// (driver.Value, error), so pass the result as the argument instead of v itself.
 //
-// An invalid value returns nil, which database/sql sends as SQL NULL, whatever
-// Value holds. A valid value returns Value unchanged with its exact type,
-// including zero values. A valid typed nil []byte, which Scan treats as valid
-// data, is returned as a non-nil driver.Value holding []byte(nil). The default
-// argument conversion of database/sql passes it on unchanged; whether it is
-// encoded as empty bytes or as SQL NULL depends on the driver. Use Valid false
-// to send NULL.
+// NULL returns nil, which database/sql sends as SQL NULL. A valid value returns
+// Value unchanged with its exact type, including zero values. A valid typed nil
+// []byte, which Scan and NewColumnValue treat as valid data, is returned as a
+// non-nil driver.Value holding []byte(nil). The default argument conversion of
+// database/sql passes it on unchanged; whether it is encoded as empty bytes or
+// as SQL NULL depends on the driver. Use the zero ColumnValue to send NULL.
 //
-// Bytes are not copied: the result shares its backing array with Value, so do
-// not modify it while a call that uses it may be running.
+// Bytes are not copied: the result shares its backing array with v, so do not
+// modify it while a call that uses it may be running.
 func (v ColumnValue[T]) DriverValue() driver.Value {
-	if !v.Valid {
+	if !v.hasValue {
 		return nil
 	}
-	return v.Value
+	return v.value
 }

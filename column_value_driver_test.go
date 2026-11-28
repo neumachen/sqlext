@@ -24,18 +24,19 @@ func TestColumnValueDriverValueArguments(t *testing.T) {
 		want driver.Value
 	}{
 		{"zero value is NULL", sqlext.ColumnValue[int64]{}.DriverValue(), nil},
-		{"invalid ignores value", sqlext.ColumnValue[string]{Value: "stale"}.DriverValue(), nil},
-		{"invalid bytes are NULL", sqlext.ColumnValue[[]byte]{Value: []byte("stale")}.DriverValue(), nil},
-		{"int64", sqlext.ColumnValue[int64]{Value: 42, Valid: true}.DriverValue(), int64(42)},
-		{"int64 zero", sqlext.ColumnValue[int64]{Valid: true}.DriverValue(), int64(0)},
-		{"float64 zero", sqlext.ColumnValue[float64]{Valid: true}.DriverValue(), float64(0)},
-		{"bool false", sqlext.ColumnValue[bool]{Valid: true}.DriverValue(), false},
-		{"string empty", sqlext.ColumnValue[string]{Valid: true}.DriverValue(), ""},
-		{"bytes", sqlext.ColumnValue[[]byte]{Value: []byte("data"), Valid: true}.DriverValue(), []byte("data")},
-		{"bytes empty", sqlext.ColumnValue[[]byte]{Value: []byte{}, Valid: true}.DriverValue(), []byte{}},
-		{"bytes typed nil", sqlext.ColumnValue[[]byte]{Valid: true}.DriverValue(), []byte(nil)},
-		{"time", sqlext.ColumnValue[time.Time]{Value: at, Valid: true}.DriverValue(), at},
-		{"time zero", sqlext.ColumnValue[time.Time]{Valid: true}.DriverValue(), zeroTime},
+		{"scanned NULL drops previous string", scannedNull(t, sqlext.NewColumnValue("stale")).DriverValue(), nil},
+		{"scanned NULL drops previous bytes", scannedNull(t, sqlext.NewColumnValue([]byte("stale"))).DriverValue(), nil},
+		{"int64", sqlext.NewColumnValue(int64(42)).DriverValue(), int64(42)},
+		{"int64 zero", sqlext.NewColumnValue(int64(0)).DriverValue(), int64(0)},
+		{"float64 zero", sqlext.NewColumnValue(float64(0)).DriverValue(), float64(0)},
+		{"bool false", sqlext.NewColumnValue(false).DriverValue(), false},
+		{"string empty", sqlext.NewColumnValue("").DriverValue(), ""},
+		{"bytes", sqlext.NewColumnValue([]byte("data")).DriverValue(), []byte("data")},
+		{"bytes empty", sqlext.NewColumnValue([]byte{}).DriverValue(), []byte{}},
+		{"bytes typed nil", sqlext.NewColumnValue([]byte(nil)).DriverValue(), []byte(nil)},
+		{"scanned bytes typed nil", scanned(t, []byte(nil)).DriverValue(), []byte(nil)},
+		{"time", sqlext.NewColumnValue(at).DriverValue(), at},
+		{"time zero", sqlext.NewColumnValue(zeroTime).DriverValue(), zeroTime},
 	}
 	stmt := prepareStatement(t, "UPDATE t SET v = @v")
 	for _, tt := range tests {
@@ -52,9 +53,24 @@ func TestColumnValueDriverValueArguments(t *testing.T) {
 }
 
 func TestColumnValueDriverValueSharesBytes(t *testing.T) {
-	value := sqlext.ColumnValue[[]byte]{Value: []byte("data"), Valid: true}
+	value := sqlext.NewColumnValue([]byte("data"))
 	got, ok := value.DriverValue().([]byte)
 	require.True(t, ok)
 	got[0] = '!'
-	assert.Equal(t, []byte("!ata"), value.Value, "DriverValue does not copy bytes")
+	assert.Equal(t, []byte("!ata"), value.Value(), "DriverValue does not copy bytes")
+}
+
+// scannedNull returns value after scanning SQL NULL into it. With private
+// fields, a scan is the only way an earlier value can precede NULL.
+func scannedNull[T sqlext.ColumnType](t *testing.T, value sqlext.ColumnValue[T]) sqlext.ColumnValue[T] {
+	t.Helper()
+	require.NoError(t, value.Scan(nil))
+	return value
+}
+
+func scanned(t *testing.T, src []byte) sqlext.ColumnValue[[]byte] {
+	t.Helper()
+	var value sqlext.ColumnValue[[]byte]
+	require.NoError(t, value.Scan(src))
+	return value
 }

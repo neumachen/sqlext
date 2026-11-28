@@ -12,8 +12,9 @@ The `sqlext` (SQL extension) package provides a set of utilities and abstraction
   one statement through a `*sql.DB`, `*sql.Tx` or `*sql.Conn`.
 - **Typed scanning**: `NewRowScanner` with `BindColumn` and
   `BindNullableColumn` maps result columns to caller-owned fields.
-  `ColumnValue[T]` keeps SQL NULL apart from zero values, and its
-  `DriverValue` method turns it back into a query argument.
+  `ColumnValue[T]` keeps SQL NULL apart from zero values; `NewColumnValue`
+  builds a valid one, and its `DriverValue` method turns it back into a query
+  argument.
 - **Mapped rows**: `MapRow` and `MapRows` read results into `MappedRow` maps;
   `DefineColumnBinding` with `BindColumnToField` binds those to fields.
 
@@ -77,8 +78,9 @@ database-free executable example is in `typed_example_test.go`.
 
 - `BindColumn` skips SQL NULL, leaving the destination unchanged; reset a reused
   record before each row as shown above. It delivers valid zero values.
-- `BindNullableColumn` also delivers NULL as `ColumnValue[T]{Valid: false}`.
-  This preserves the difference between NULL and an ordinary zero value.
+- `BindNullableColumn` also delivers NULL, as a `ColumnValue[T]` whose
+  `IsNull` reports true. This preserves the difference between NULL and an
+  ordinary zero value.
 - Only a nil driver source denotes SQL NULL. A typed nil or empty `[]byte` is
   valid byte data. Retained bytes are copied before the callback receives them.
 - All result columns and bindings must match one-to-one by exact name. Order may
@@ -119,6 +121,53 @@ takes only a column and a binder function.
 `FilterUsingFunc` now returns an empty collection instead of the original when
 nothing matches, and an error for a nil callback.
 
+### Reading and building a ColumnValue
+
+`ColumnValue[T]` has no exported fields. `IsNull` reports SQL NULL, and `Value`
+returns the held value, or the zero value of `T` for NULL. The zero
+`ColumnValue` is NULL. `NewColumnValue(v)` returns a valid, non-NULL value
+holding `v`, including zero values and a typed nil `[]byte`:
+`NewColumnValue([]byte(nil))` is valid data, not NULL. `T` is inferred from
+`v`, so pass a value of an accepted type: `NewColumnValue(int64(0))`, not
+`NewColumnValue(0)`, whose `int` argument does not compile.
+
+```go
+name := sqlext.NewColumnValue("Ada")   // valid
+var nickname sqlext.ColumnValue[string] // NULL
+fmt.Println(name.Value(), name.IsNull(), nickname.IsNull()) // Ada false true
+```
+
+- `Scan` copies the bytes it retains, so a scanned value never shares memory
+  with the driver. NULL and a failed scan clear any earlier value and leave
+  NULL.
+- `NewColumnValue` does not copy bytes: the result shares its backing array
+  with the `[]byte` passed in, and so do `Value` and `DriverValue`. The caller
+  keeps ownership of the slice; do not modify it while the `ColumnValue`, or a
+  call that uses its `DriverValue`, may still read it. Pass `bytes.Clone(b)`
+  when you need an independent copy.
+
+Breaking change: the exported `Value` and `Valid` fields of `ColumnValue` are
+now unexported. Code that reads or assigns them, or builds a `ColumnValue`
+with a composite literal that names them, no longer compiles. Migrate:
+
+| Before | After |
+| --- | --- |
+| `v.Valid` | `!v.IsNull()` |
+| `v.Value` | `v.Value()` |
+| `ColumnValue[T]{Value: x, Valid: true}` | `NewColumnValue(x)`, with `x` of type `T` |
+| `ColumnValue[T]{Valid: true}` | `NewColumnValue(zero)`, for example `NewColumnValue(int64(0))` or `NewColumnValue([]byte(nil))` |
+| `ColumnValue[T]{Valid: false}`, `ColumnValue[T]{}` | `ColumnValue[T]{}` |
+| `v.Value = x; v.Valid = true` | `v = NewColumnValue(x)` |
+| `v.Valid = false` | `v = ColumnValue[T]{}` |
+
+- NULL always holds the zero value of `T`; a NULL `ColumnValue` that still
+  carries an earlier value can no longer be built.
+- `encoding/json`, `encoding/gob` and other reflection-based encoders no longer
+  see the fields: `json.Marshal` now produces `{}` for a `ColumnValue`, and
+  `gob` rejects it. Convert to your own type with `IsNull` and `Value` before
+  encoding.
+- `Scan`, `BindColumn`, `BindNullableColumn` and `DriverValue` behave as before.
+
 ### Selecting and replacing bindings
 
 A record usually describes all of its columns once, while a query may select
@@ -137,7 +186,7 @@ if err != nil {
     return nil, err
 }
 bindings, err = bindings.Replace(sqlext.BindColumn("name", func(v string) error {
-    customer.Name = sqlext.ColumnValue[string]{Value: strings.TrimSpace(v), Valid: true}
+    customer.Name = sqlext.NewColumnValue(strings.TrimSpace(v))
     return nil
 }))
 if err != nil {
@@ -165,7 +214,7 @@ scanner, err := sqlext.NewRowScanner(rows, bindings)
 Run the isolated typed tests and example without a database:
 
 ```sh
-go test . -run '^(TestColumnValue.*|TestTyped.*|ExampleNewRowScanner)$' -count=1
+go test . -run '^(TestColumnValue.*|TestNewColumnValue.*|TestTyped.*|ExampleNewRowScanner)$' -count=1
 ```
 
 These tests are part of the default, database-free `go test ./...` run. The
@@ -382,20 +431,20 @@ _, err = sqlext.ExecContext(ctx, db, update,
 )
 ```
 
-- `ColumnValue` does not implement `driver.Valuer`, because its `Value` field
-  takes that method name. Pass the result of `DriverValue`, not the
+- `ColumnValue` does not implement `driver.Valuer`: its `Value` method returns
+  `T`, not `(driver.Value, error)`. Pass the result of `DriverValue`, not the
   `ColumnValue` itself.
-- An invalid value, including the zero `ColumnValue`, returns `nil`, which is
-  sent as NULL whatever `Value` holds.
-- A valid value returns `Value` unchanged with its exact type, zero values
-  included: `ColumnValue[int64]{Valid: true}` sends `int64(0)`, not NULL.
+- NULL, including the zero `ColumnValue`, returns `nil`, which is sent as NULL.
+- A valid value returns `Value()` unchanged with its exact type, zero values
+  included: `NewColumnValue(int64(0))` sends `int64(0)`, not NULL.
 - A valid typed nil `[]byte` is returned as a non-nil `driver.Value` holding
-  `[]byte(nil)`, because `Scan` treats it as valid data. The default argument
-  conversion of `database/sql` passes it to the driver unchanged; whether the
-  driver encodes it as empty bytes or as SQL NULL depends on the driver. Use
-  `Valid: false` when you mean NULL.
+  `[]byte(nil)`, because `Scan` and `NewColumnValue` treat it as valid data.
+  The default argument conversion of `database/sql` passes it to the driver
+  unchanged; whether the driver encodes it as empty bytes or as SQL NULL
+  depends on the driver. Use the zero `ColumnValue` when you mean NULL.
 - Bytes are not copied: the returned `[]byte` shares its backing array with
-  `Value`, and the bound argument is shared as described in
+  the `ColumnValue` (and, for `NewColumnValue`, with the slice passed in), and
+  the bound argument is shared as described in
   [Defaults, per-call values and concurrency](#defaults-per-call-values-and-concurrency).
   Do not modify it while a call that uses it may be running.
 

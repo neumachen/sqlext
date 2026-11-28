@@ -30,7 +30,7 @@ func TestTypedRowOrderedReusableMapping(t *testing.T) {
 	require.True(t, rows.Next())
 	require.NoError(t, scanner.Scan())
 	require.Equal(t, int64(1), id)
-	require.Equal(t, sqlext.ColumnValue[string]{Value: adaName, Valid: true}, name)
+	require.Equal(t, sqlext.NewColumnValue(adaName), name)
 	first := raw
 	require.Equal(t, 1, fixture.nextCalls)
 	require.Zero(t, fixture.closeCalls)
