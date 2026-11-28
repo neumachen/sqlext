@@ -11,16 +11,20 @@ on:
 
 jobs:
   testing:
-    name: test (Go 1.27)
+    name: test (Go ${{ matrix.go }})
     runs-on: ubuntu-latest
     timeout-minutes: ${{ inputs.timeout_minutes }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # 1.24 is the minimum in go.mod; 1.27 is the current release line.
+        go: ["1.24", "1.25", "1.26", "1.27"]
     steps:
       - uses: actions/checkout@v6
 
-      # 1.27 is both the minimum in go.mod and the current release line.
       - uses: actions/setup-go@v6
         with:
-          go-version: "1.27"
+          go-version: ${{ matrix.go }}
           cache: false
 
       # The integration tests are only compiled with their build tags; vet

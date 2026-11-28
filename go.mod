@@ -1,6 +1,6 @@
 module github.com/neumachen/sqlext
 
-go 1.27
+go 1.24
 
 require (
 	github.com/google/uuid v1.3.0
