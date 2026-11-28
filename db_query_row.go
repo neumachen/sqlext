@@ -33,8 +33,8 @@ func QueryRow(
 // nil arguments, a statement that is not a single statement, or a binder
 // error. Inside a transaction, call Scan before Commit or Rollback.
 //
-// The single-statement rule, the binding rules and the reset of bound values
-// are the same as for ExecContext.
+// The single-statement rule, the binding rules, the handling of defaults and
+// per-call values, and the concurrency rules are the same as for ExecContext.
 func QueryRowContext(
 	ctx context.Context,
 	dbPrepExec DBPreparerExecutor,

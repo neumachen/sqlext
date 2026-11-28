@@ -1,6 +1,8 @@
 package sqlext
 
 import (
+	"sync"
+
 	"github.com/neumachen/sqlext/internal"
 )
 
@@ -50,15 +52,31 @@ type BoundParameterValues []any
 
 // PreparedStatement is an interface that represents an SQL query with named parameters.
 // It defines several methods for manipulating and executing the query.
+//
+// For a statement returned by PrepareStatement, values bound directly with
+// BindParameterValue or BindParameterValues are defaults: Exec, Query, QueryRow
+// and their Context variants send them on every call until
+// ResetParametersValues clears them, whether the calls succeed or fail. Binders
+// passed to those functions override the defaults for that call only. Such a
+// statement may be shared between goroutines: direct binds, reads, resets and
+// executions are synchronized, and each execution works on its own copy of the
+// defaults. The copies are shallow; see ExecContext.
+//
+// Other implementations are used as before: binders are applied to the
+// statement itself and ResetParametersValues is called after every execution.
+// sqlext adds no synchronization for them, so whether they may be shared
+// between goroutines depends on the implementation.
 type PreparedStatement interface {
 	// UnpreparedStatement returns the original SQL statement before preparation.
 	UnpreparedStatement() string
 	// Revised returns the parsed query with positional parameters.
 	Revised() string
+	// ResetParametersValues clears all bound values, so unbound parameters
+	// are sent as NULL.
 	ResetParametersValues()
 	// ParameterPositions returns the parameter positions for the SQL statement.
 	ParameterPositions() *ParameterPositions
-	// BoundNamedParameterValues returns the bound named parameter values.
+	// BoundParameterValues returns the bound values in placeholder order.
 	BoundParameterValues() BoundParameterValues
 	// BindParameterValue binds a value to a named parameter in the SQL statement.
 	BindParameterValue(bindParameter string, bindValue any) error
@@ -67,7 +85,13 @@ type PreparedStatement interface {
 }
 
 // preparedStatement is a struct that handles the translation of named parameters to positional parameters for SQL statements.
+//
+// originalStatement, revisedStatement and namedParamPositions are set by
+// PrepareStatement and never written again, so they are read without the
+// lock. boundNamedParamValues holds the defaults and is only accessed with mu
+// held. Methods use pointer receivers so the mutex is never copied.
 type preparedStatement struct {
+	mu                    sync.RWMutex
 	boundNamedParamValues BoundParameterValues
 	namedParamPositions   *ParameterPositions
 	revisedStatement      string
@@ -75,41 +99,49 @@ type preparedStatement struct {
 }
 
 // getTotalIndices returns the total number of parameter positions in the statement.
-func (p preparedStatement) getTotalIndices() int {
+func (p *preparedStatement) getTotalIndices() int {
 	if internal.IsNilOrZeroValue(p.namedParamPositions) {
 		return 0
 	}
 	return p.namedParamPositions.totalPositions
 }
 
-// ResetParametersValues resets the boundNamedParamValues field to an empty BoundParameterValues slice.
+// ResetParametersValues clears the default values. Executions that already
+// took their copy of the defaults are not affected.
 func (p *preparedStatement) ResetParametersValues() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	if count := p.getTotalIndices(); count > 0 {
 		p.boundNamedParamValues = make(BoundParameterValues, count)
 	}
 }
 
 // UnpreparedStatement returns the original SQL statement before preparation.
-func (p preparedStatement) UnpreparedStatement() string {
+func (p *preparedStatement) UnpreparedStatement() string {
 	return p.originalStatement
 }
 
 // Revised returns the parsed query with positional parameters.
-func (p preparedStatement) Revised() string {
+func (p *preparedStatement) Revised() string {
 	return p.revisedStatement
 }
 
-// BoundNamedParameterValues returns the bound named parameter values.
-func (p preparedStatement) BoundParameterValues() BoundParameterValues {
-	if len(p.boundNamedParamValues) < 1 {
-		return nil
-	}
-
-	return p.boundNamedParamValues
+// BoundParameterValues returns a shallow copy of the default values, so that
+// callers can read it while other goroutines bind or execute. Writing to the
+// returned slice does not change the statement.
+func (p *preparedStatement) BoundParameterValues() BoundParameterValues {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return copyBoundValues(p.boundNamedParamValues)
 }
 
 // ParameterPositions returns the named parameter positions for the SQL statement.
-func (p preparedStatement) ParameterPositions() *ParameterPositions {
+//
+// It returns a pointer to a copy, so a caller that overwrites the returned
+// struct cannot change the positions that binding uses or race with it. The
+// copy is shallow: the map inside is shared, which is safe because it is
+// private and never modified after PrepareStatement.
+func (p *preparedStatement) ParameterPositions() *ParameterPositions {
 	if internal.IsNilOrZeroValue(p.namedParamPositions) {
 		return nil
 	}
@@ -118,18 +150,117 @@ func (p preparedStatement) ParameterPositions() *ParameterPositions {
 		return nil
 	}
 
-	return p.namedParamPositions
+	positions := *p.namedParamPositions
+	return &positions
 }
 
-// BindParameterValue binds a value to a named parameter in the SQL statement.
+// BindParameterValue binds a default value to a named parameter in the SQL
+// statement. The value is kept until it is bound again or the values are reset.
 func (p *preparedStatement) BindParameterValue(parameterName string, bindValue any) error {
-	if internal.IsNilOrZeroValue(p.namedParamPositions) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	bindAtPositions(p.boundNamedParamValues, p.namedParamPositions, parameterName, bindValue)
+	return nil
+}
+
+// newExecution returns the private state of one execution, starting from a
+// copy of the current defaults taken under the lock.
+func (p *preparedStatement) newExecution() *executionStatement {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return &executionStatement{
+		statement: p,
+		values:    copyBoundValues(p.boundNamedParamValues),
+	}
+}
+
+// executionStatement is what the binders of one Exec, Query or QueryRow call
+// receive for a statement from PrepareStatement. It writes to values, which
+// only this execution sees, so per-call binders never change the shared
+// defaults and run without holding the statement's lock. That also lets a
+// binder call the shared statement's methods without deadlocking.
+type executionStatement struct {
+	statement *preparedStatement
+	values    BoundParameterValues
+}
+
+// UnpreparedStatement returns the original SQL statement before preparation.
+func (e *executionStatement) UnpreparedStatement() string {
+	return e.statement.UnpreparedStatement()
+}
+
+// Revised returns the parsed query with positional parameters.
+func (e *executionStatement) Revised() string {
+	return e.statement.Revised()
+}
+
+// ResetParametersValues clears the values of this execution only, including
+// the defaults it started from; the statement's defaults are kept.
+func (e *executionStatement) ResetParametersValues() {
+	if len(e.values) > 0 {
+		e.values = make(BoundParameterValues, len(e.values))
+	}
+}
+
+// ParameterPositions returns a copy of the named parameter positions for the
+// SQL statement; see preparedStatement.ParameterPositions.
+func (e *executionStatement) ParameterPositions() *ParameterPositions {
+	return e.statement.ParameterPositions()
+}
+
+// BoundParameterValues returns a shallow copy of the values of this execution.
+func (e *executionStatement) BoundParameterValues() BoundParameterValues {
+	return copyBoundValues(e.values)
+}
+
+// BindParameterValue binds a value for this execution only.
+func (e *executionStatement) BindParameterValue(parameterName string, bindValue any) error {
+	bindAtPositions(e.values, e.statement.namedParamPositions, parameterName, bindValue)
+	return nil
+}
+
+// BindParameterValues applies the binders to this execution only.
+func (e *executionStatement) BindParameterValues(binderFuncs ...BindParameterValueFunc) error {
+	return applyBinders(e, binderFuncs)
+}
+
+// arguments returns the values to send to the executor. They are copied so
+// that a binder that kept the executionStatement cannot change them while the
+// executor uses them.
+func (e *executionStatement) arguments() []any {
+	return copyBoundValues(e.values)
+}
+
+// bindAtPositions stores bindValue at every position of parameterName.
+// Unknown names are ignored.
+func bindAtPositions(values BoundParameterValues, positions *ParameterPositions, parameterName string, bindValue any) {
+	if internal.IsNilOrZeroValue(positions) {
+		return
+	}
+	for _, i := range positions.getPositions(parameterName) {
+		values[i] = bindValue
+	}
+}
+
+// copyBoundValues returns a shallow copy of values, or nil when there are
+// none, matching what BoundParameterValues has always returned for a
+// statement without parameters.
+func copyBoundValues(values []any) BoundParameterValues {
+	if len(values) == 0 {
 		return nil
 	}
+	out := make(BoundParameterValues, len(values))
+	copy(out, values)
+	return out
+}
 
-	if positions := p.namedParamPositions.getPositions(parameterName); len(positions) > 0 {
-		for i := range positions {
-			p.boundNamedParamValues[positions[i]] = bindValue
+func applyBinders(p PreparedStatement, binderFuncs []BindParameterValueFunc) error {
+	for i := range binderFuncs {
+		if internal.IsNilOrZeroValue(binderFuncs[i]) {
+			continue
+		}
+		if err := binderFuncs[i](p); err != nil {
+			return err
 		}
 	}
 
@@ -161,18 +292,16 @@ func BindParameterValue(bindParameter string, bindValue any) BindParameterValueF
 	}
 }
 
-// BindParameterValues sets the values for multiple named parameters using a list of BindNamedParameterValueFunc functions.
+// BindParameterValues applies the binders to the statement, so the values they
+// bind become defaults. The binders run without the statement's lock and each
+// bind is synchronized on its own, so an execution in another goroutine can
+// copy the defaults while only some of the binders have run. An error stops
+// the remaining binders; values bound before it are kept.
 func (p *preparedStatement) BindParameterValues(binderFuncs ...BindParameterValueFunc) error {
-	for i := range binderFuncs {
-		if internal.IsNilOrZeroValue(binderFuncs[i]) {
-			continue
-		}
-		if err := binderFuncs[i](p); err != nil {
-			return err
-		}
-	}
-
-	return nil
+	return applyBinders(p, binderFuncs)
 }
 
-var _ PreparedStatement = (*preparedStatement)(nil)
+var (
+	_ PreparedStatement = (*preparedStatement)(nil)
+	_ PreparedStatement = (*executionStatement)(nil)
+)

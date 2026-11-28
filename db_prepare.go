@@ -15,19 +15,26 @@ var (
 )
 
 // startExecution checks the inputs that would otherwise cause a panic and
-// returns the function that resets the statement's bound values. Callers defer
-// the reset before checking the error, so values are reset after every call,
-// including one rejected for a nil executor. The reset does nothing for a nil
-// statement, whose methods cannot be called.
-func startExecution(dbExec DBExecutor, preparedStatement PreparedStatement) (reset func(), err error) {
+// returns the function to run when the call ends. Callers defer it before
+// checking the error.
+//
+// For a statement from PrepareStatement it does nothing: directly bound values
+// are defaults that persist until ResetParametersValues, and per-call binders
+// never touch the statement. For any other implementation it resets the
+// statement's bound values after every call, including one rejected for a nil
+// executor, as earlier versions did for all statements. Nothing is reset for a
+// nil statement, whose methods cannot be called.
+func startExecution(dbExec DBExecutor, statement PreparedStatement) (reset func(), err error) {
 	reset = func() {}
-	if !internal.IsNil(preparedStatement) {
-		reset = preparedStatement.ResetParametersValues
+	if !internal.IsNil(statement) {
+		if _, builtIn := statement.(*preparedStatement); !builtIn {
+			reset = statement.ResetParametersValues
+		}
 	}
 	if internal.IsNil(dbExec) {
 		return reset, errNilExecutor
 	}
-	if internal.IsNil(preparedStatement) {
+	if internal.IsNil(statement) {
 		return reset, errNilStatement
 	}
 	return reset, nil
@@ -39,26 +46,46 @@ func startExecution(dbExec DBExecutor, preparedStatement PreparedStatement) (res
 // helpers execute through the executor's context methods, so database/sql and
 // the driver own any statement they need and release it with the result or
 // rows.
+//
+// For a statement from PrepareStatement the binders run on a private copy of
+// the defaults taken after the statement check, so the defaults are never
+// changed by a call. Other implementations are bound in place as before. The
+// returned arguments never share storage with the statement.
 func prepareExecution(
-	preparedStatement PreparedStatement,
+	statement PreparedStatement,
 	binderFuncs ...BindParameterValueFunc,
 ) (
 	query string,
 	args []any,
 	err error,
 ) {
-	query = preparedStatement.Revised()
+	query = statement.Revised()
 	if err := checkSingleStatement(query); err != nil {
 		return "", nil, err
 	}
 
-	if bindValuesGiven(binderFuncs) {
-		if err := preparedStatement.BindParameterValues(binderFuncs...); err != nil {
-			return "", nil, fmt.Errorf("bind parameter values: %w", err)
+	if builtIn, ok := statement.(*preparedStatement); ok {
+		execution := builtIn.newExecution()
+		if err := bindParameterValues(execution, binderFuncs); err != nil {
+			return "", nil, err
 		}
+		return query, execution.arguments(), nil
 	}
 
-	return query, preparedStatement.BoundParameterValues(), nil
+	if err := bindParameterValues(statement, binderFuncs); err != nil {
+		return "", nil, err
+	}
+	return query, copyBoundValues(statement.BoundParameterValues()), nil
+}
+
+func bindParameterValues(target PreparedStatement, binderFuncs []BindParameterValueFunc) error {
+	if !bindValuesGiven(binderFuncs) {
+		return nil
+	}
+	if err := target.BindParameterValues(binderFuncs...); err != nil {
+		return fmt.Errorf("bind parameter values: %w", err)
+	}
+	return nil
 }
 
 func bindValuesGiven(binderFuncs []BindParameterValueFunc) bool {

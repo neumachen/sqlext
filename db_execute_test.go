@@ -154,7 +154,8 @@ func TestExecutionHelpersExecuteDirectlyWithBoundValues(t *testing.T) {
 			assert.Equal(t, "SELECT $1, $2, $3, $4, $5, $6, $7;", call.query)
 			assert.Equal(t, []any{0, "x", 0, nil, nil, false, ""}, call.args,
 				"repeated names bound everywhere, zero values kept, explicit nil and missing names sent as nil")
-			assert.Equal(t, BoundParameterValues{nil, nil, nil, nil, nil, nil, nil}, ps.BoundParameterValues(), "values reset")
+			assert.Equal(t, BoundParameterValues{nil, nil, nil, nil, nil, nil, nil}, ps.BoundParameterValues(),
+				"per-call values do not become defaults")
 		})
 	}
 }
@@ -193,8 +194,8 @@ func TestExecutionHelpersRejectMultipleStatementsBeforeExecuting(t *testing.T) {
 				require.ErrorIs(t, err, ErrMultipleStatements)
 				assert.Empty(t, db.calls, "nothing sent to the executor")
 				assert.False(t, binderCalled, "binders do not run for a rejected statement")
-				for _, v := range ps.BoundParameterValues() {
-					assert.Nil(t, v, "pre-bound values reset")
+				if ps.ParameterPositions() != nil {
+					assert.Equal(t, BoundParameterValues{1}, ps.BoundParameterValues(), "defaults kept after a rejected call")
 				}
 			})
 		}
@@ -215,11 +216,11 @@ func TestExecutionHelpersBinderErrorStopsBeforeExecuting(t *testing.T) {
 			)
 			require.ErrorIs(t, err, boom)
 			assert.Empty(t, db.calls)
-			assert.Equal(t, BoundParameterValues{nil, nil}, ps.BoundParameterValues())
+			assert.Equal(t, BoundParameterValues{1, nil}, ps.BoundParameterValues(), "defaults kept, override not stored")
 
 			require.NoError(t, r.run(context.Background(), db, ps))
 			require.Len(t, db.calls, 1)
-			assert.Equal(t, []any{nil, nil}, db.calls[0].args, "failed binding does not leak into the next call")
+			assert.Equal(t, []any{1, nil}, db.calls[0].args, "failed binding does not leak into the next call")
 		})
 	}
 }
@@ -272,9 +273,9 @@ func TestExecutionHelpersRejectNilInputs(t *testing.T) {
 	}
 }
 
-// A failed call must still reset the statement's bound values, including when
-// the executor is nil, as the helpers did before direct execution.
-func TestExecutionHelpersResetBoundValuesWhenExecutorIsNil(t *testing.T) {
+// A call rejected for a nil executor keeps the defaults of a statement from
+// PrepareStatement and runs none of its binders.
+func TestExecutionHelpersKeepDefaultsWhenExecutorIsNil(t *testing.T) {
 	for _, r := range runners() {
 		for name, nilExecutor := range nilExecutors() {
 			t.Run(r.name+"/executor "+name, func(t *testing.T) {
@@ -292,14 +293,14 @@ func TestExecutionHelpersResetBoundValuesWhenExecutorIsNil(t *testing.T) {
 				})
 				require.ErrorIs(t, err, errNilExecutor)
 				assert.False(t, binderCalled, "binders do not run without an executor")
-				assert.Equal(t, BoundParameterValues{nil, nil, nil}, ps.BoundParameterValues(), "pre-bound values reset")
+				assert.Equal(t, BoundParameterValues{1, 2, 1}, ps.BoundParameterValues(), "defaults kept")
 
 				db := newExecutor()
 				require.NoError(t, r.run(context.Background(), db, ps))
 				require.NoError(t, r.run(context.Background(), db, ps, BindParameterValue("b", 3)))
 				require.Len(t, db.calls, 2)
-				assert.Equal(t, []any{nil, nil, nil}, db.calls[0].args, "values from before the failed call are not sent")
-				assert.Equal(t, []any{nil, 3, nil}, db.calls[1].args)
+				assert.Equal(t, []any{1, 2, 1}, db.calls[0].args, "defaults sent after the failed call")
+				assert.Equal(t, []any{1, 3, 1}, db.calls[1].args)
 			})
 		}
 		for name, ps := range nilStatements() {
@@ -309,6 +310,34 @@ func TestExecutionHelpersResetBoundValuesWhenExecutorIsNil(t *testing.T) {
 					err = r.run(context.Background(), nil, ps)
 				})
 				require.ErrorIs(t, err, errNilExecutor, "the executor is checked first, as before")
+			})
+		}
+	}
+}
+
+// Statements not created by PrepareStatement keep the earlier behavior: a
+// failed call still resets their bound values, including when the executor is
+// nil.
+func TestExecutionHelpersResetForeignStatementWhenExecutorIsNil(t *testing.T) {
+	for _, r := range runners() {
+		for name, nilExecutor := range nilExecutors() {
+			t.Run(r.name+"/executor "+name, func(t *testing.T) {
+				base := mustPrepare(t, "SELECT @a, @b, @a")
+				ps := foreignStatement{PreparedStatement: base, revised: base.Revised()}
+				require.NoError(t, ps.BindParameterValue("a", 1))
+				require.NoError(t, ps.BindParameterValue("b", 2))
+
+				var err error
+				require.NotPanics(t, func() {
+					err = r.run(context.Background(), nilExecutor, ps)
+				})
+				require.ErrorIs(t, err, errNilExecutor)
+				assert.Equal(t, BoundParameterValues{nil, nil, nil}, ps.BoundParameterValues(), "pre-bound values reset")
+
+				db := newExecutor()
+				require.NoError(t, r.run(context.Background(), db, ps))
+				require.Len(t, db.calls, 1)
+				assert.Equal(t, []any{nil, nil, nil}, db.calls[0].args, "values from before the failed call are not sent")
 			})
 		}
 	}
@@ -375,7 +404,7 @@ func TestExecutionHelpersPassContext(t *testing.T) {
 	})
 }
 
-func TestExecutionHelpersResetAndReuse(t *testing.T) {
+func TestExecutionHelpersDefaultsPersistAcrossCalls(t *testing.T) {
 	db := newExecutor()
 	ps := mustPrepare(t, "UPDATE t SET v = @v WHERE id = @id")
 	require.NoError(t, ps.BindParameterValue("v", 5))
@@ -386,11 +415,15 @@ func TestExecutionHelpersResetAndReuse(t *testing.T) {
 	require.NoError(t, err)
 	_, err = Exec(db, ps, BindParameterValue("v", 7), BindParameterValue("id", 3))
 	require.NoError(t, err)
+	_, err = Exec(db, ps)
+	require.NoError(t, err)
 
-	require.Len(t, db.calls, 3)
-	assert.Equal(t, []any{5, 1}, db.calls[0].args, "pre-bound value used by the next call")
-	assert.Equal(t, []any{nil, 2}, db.calls[1].args, "pre-bound value consumed by the earlier call")
-	assert.Equal(t, []any{7, 3}, db.calls[2].args)
+	require.Len(t, db.calls, 4)
+	assert.Equal(t, []any{5, 1}, db.calls[0].args, "default used by the next call")
+	assert.Equal(t, []any{5, 2}, db.calls[1].args, "default still used by later calls")
+	assert.Equal(t, []any{7, 3}, db.calls[2].args, "override replaces the default for one call")
+	assert.Equal(t, []any{5, nil}, db.calls[3].args, "overrides are not kept")
+	assert.Equal(t, BoundParameterValues{5, nil}, ps.BoundParameterValues())
 }
 
 // foreignStatement is a PreparedStatement implemented outside the rewriter.

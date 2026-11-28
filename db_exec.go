@@ -46,10 +46,27 @@ func Exec(
 // returns an error; binder errors are wrapped and remain matchable with
 // errors.Is and errors.As. Database errors are returned unchanged.
 //
-// Bound values are reset after every call, whether it succeeds or not, so
-// values bound before the call are used by that call only. Parameter names
-// that are not bound are sent as NULL, and names that do not occur in the
-// statement are ignored.
+// For a statement from PrepareStatement, values bound directly on it are
+// defaults that every call sends until ResetParametersValues clears them; a
+// call never resets them, whether it succeeds or fails. binderFuncs override
+// the defaults for this call only: the call copies the defaults after the
+// statement check and applies its binders to that copy, without holding the
+// statement's lock, so overlapping calls on a shared statement never see each
+// other's values. The binders therefore receive this per-call state, not the
+// statement itself. The copy of the defaults and the arguments given to the
+// executor are shallow copies: the slice is copied, the values in it are not.
+// A bound pointer, map, slice or []byte is shared with the caller and with
+// other calls, so do not modify it while a call that uses it may be running.
+//
+// Any other PreparedStatement implementation is handled as in earlier
+// versions: the binders are applied to the statement itself, and its
+// ResetParametersValues is called after every call, whether it succeeds or
+// not. sqlext does not synchronize such statements; whether one may be shared
+// between goroutines depends on the implementation.
+//
+// Parameter names that are not bound are sent as NULL, a parameter bound to
+// nil is sent as NULL even when a default is set, and names that do not occur
+// in the statement are ignored.
 func ExecContext(
 	ctx context.Context,
 	dbPrepExec DBPreparerExecutor,
